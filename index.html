@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Apps</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+<style>
+  :root {
+    --bg:#f6f7f9; --bg2:#ffffff; --border:#e3e6ea; --text:#1a202c; --text2:#5a6472; --text3:#98a1ad;
+    --green:#16a34a; --amber:#d97706; --accent:#2563eb; --radius:14px;
+    --shadow:0 1px 3px rgba(0,0,0,.06), 0 4px 14px rgba(0,0,0,.05);
+    --shadow-hover:0 4px 10px rgba(0,0,0,.08), 0 10px 28px rgba(0,0,0,.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0f1216; --bg2:#171c22; --border:#262d36; --text:#e8ecf1; --text2:#9aa5b1; --text3:#5f6a76;
+      --green:#22c55e; --amber:#f59e0b; --accent:#3b82f6;
+      --shadow:0 1px 3px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+      --shadow-hover:0 4px 10px rgba(0,0,0,.5), 0 10px 28px rgba(0,0,0,.45);
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background:var(--bg); color:var(--text); min-height:100vh;
+    display:flex; flex-direction:column; align-items:center;
+    padding:clamp(20px, 5vw, 48px) 16px;
+  }
+  header { text-align:center; margin-bottom:clamp(24px, 5vw, 44px); }
+  h1 { font-size:clamp(26px, 6vw, 36px); font-weight:800; letter-spacing:-.02em; }
+  .sub { color:var(--text2); font-size:14px; margin-top:6px; }
+  .grid {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(270px, 1fr));
+    gap:18px; width:100%; max-width:820px;
+  }
+  a.card {
+    display:block; text-decoration:none; color:var(--text);
+    background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius);
+    padding:22px 20px; box-shadow:var(--shadow);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  a.card:hover { transform:translateY(-3px); box-shadow:var(--shadow-hover); }
+  .icon { font-size:38px; line-height:1; margin-bottom:12px; }
+  .name { font-size:18px; font-weight:700; margin-bottom:5px; display:flex; align-items:center; gap:8px; }
+  .desc { font-size:13px; color:var(--text2); line-height:1.5; }
+  .status { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600; margin-top:12px; color:var(--text3); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--text3); }
+  .dot.ok { background:var(--green); }
+  .dot.wake { background:var(--amber); animation:pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  .placeholder {
+    border:2px dashed var(--border); border-radius:var(--radius);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:22px 20px; color:var(--text3); font-size:13px; text-align:center; gap:8px;
+    min-height:150px;
+  }
+  .placeholder .plus { font-size:28px; }
+  footer { margin-top:auto; padding-top:40px; font-size:11px; color:var(--text3); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏠 My Apps</h1>
+  <div class="sub">Everything in one place — pick an app below.</div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<footer id="foot"></footer>
+
+<script>
+// ─── Add new apps here — one object per card ─────────────────────────────────
+// health: optional URL polled to show ready/waking status (for hosts that sleep)
+const APPS = [
+  {
+    icon: '📈',
+    name: 'DivTracker',
+    desc: 'Dividend portfolio tracker — income, buy advisor, market scan, payment calendar.',
+    url:  'https://divtracker-xbfw.onrender.com/divtrack.html',
+    health: 'https://divtracker-xbfw.onrender.com/health',
+    note: 'Sleeps when idle — opening this page wakes it.',
+  },
+  {
+    icon: '💰',
+    name: 'Monthly Budget',
+    desc: 'Month-by-month budget, debt payoff planner, savings goals, and net-worth outlook.',
+    url:  '/budget/',
+  },
+];
+
+const grid = document.getElementById('grid');
+APPS.forEach((app, i) => {
+  const a = document.createElement('a');
+  a.className = 'card';
+  a.href = app.url;
+  a.innerHTML =
+    '<div class="icon">' + app.icon + '</div>' +
+    '<div class="name">' + app.name + '</div>' +
+    '<div class="desc">' + app.desc + '</div>' +
+    (app.health ? '<div class="status" id="st-' + i + '"><span class="dot" id="dot-' + i + '"></span><span id="lbl-' + i + '">Checking…</span></div>' : '');
+  grid.appendChild(a);
+});
+
+// Ghost card — a visual reminder that more apps can slot in here.
+const ph = document.createElement('div');
+ph.className = 'placeholder';
+ph.innerHTML = '<div class="plus">＋</div><div>Room for the next app</div>';
+grid.appendChild(ph);
+
+// Pre-warm sleeping apps and show live status: grey → amber (waking) → green (ready).
+APPS.forEach((app, i) => {
+  if (!app.health) return;
+  const dot = () => document.getElementById('dot-' + i);
+  const lbl = () => document.getElementById('lbl-' + i);
+  let attempts = 0;
+  const check = async () => {
+    attempts++;
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 8000);
+      const r = await fetch(app.health, { signal: ctl.signal });
+      clearTimeout(t);
+      if (r.ok) { dot().className = 'dot ok'; lbl().textContent = 'Ready'; return; }
+      throw new Error(r.status);
+    } catch (e) {
+      dot().className = 'dot wake';
+      lbl().textContent = 'Waking up… (~1 min, started automatically)';
+      if (attempts < 30) setTimeout(check, 10000);
+      else { dot().className = 'dot'; lbl().textContent = 'Not responding — tap to try anyway'; }
+    }
+  };
+  check();
+});
+
+document.getElementById('foot').textContent = '';
+</script>
+</body>
+</html>
