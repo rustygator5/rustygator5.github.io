@@ -62,6 +62,25 @@
     min-height:150px;
   }
   .placeholder .plus { font-size:28px; }
+  .account { margin-top:14px; font-size:13px; display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; min-height:20px; }
+  .account .who { color:var(--text2); }
+  .account button.link, .account a.link { color:var(--accent); background:none; border:none; cursor:pointer; font:inherit; font-weight:600; text-decoration:none; padding:0; }
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; padding:20px; z-index:100; }
+  .modal-bg.show { display:flex; }
+  .login { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:24px; width:100%; max-width:340px; box-shadow:var(--shadow-hover); }
+  .login h2 { font-size:19px; font-weight:800; margin-bottom:4px; }
+  .login p.hint { font-size:12.5px; color:var(--text2); margin-bottom:14px; line-height:1.5; }
+  .login label { display:block; font-size:12px; font-weight:600; color:var(--text2); margin:12px 0 5px; }
+  .login input { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--text); font-size:14px; }
+  .login input:focus { outline:none; border-color:var(--accent); }
+  .login .row { display:flex; gap:8px; margin-top:18px; }
+  .login button.primary { flex:1; padding:11px; border:none; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; font-size:14px; cursor:pointer; }
+  .login button.primary:disabled { opacity:.6; cursor:default; }
+  .login button.ghost { padding:11px 14px; border:1px solid var(--border); border-radius:10px; background:none; color:var(--text2); cursor:pointer; font-size:14px; }
+  .login .msg { font-size:12px; margin-top:12px; min-height:16px; line-height:1.4; }
+  .login .msg.err { color:#dc2626; }
+  .login .msg.ok { color:var(--green); }
+  .login .forgot { font-size:12px; margin-top:14px; text-align:center; }
   footer { margin-top:auto; padding-top:40px; font-size:11px; color:var(--text3); }
 </style>
 </head>
@@ -69,9 +88,27 @@
 <header>
   <h1>🏠 My Apps</h1>
   <div class="sub">Everything in one place — pick an app below.</div>
+  <div class="account" id="account"></div>
 </header>
 
 <div class="grid" id="grid"></div>
+
+<div class="modal-bg" id="loginModal">
+  <div class="login">
+    <h2>Sign in</h2>
+    <p class="hint">Use the same account as your apps to see your live dividend &amp; budget stats here. Your login stays in this browser.</p>
+    <label for="li-email">Email</label>
+    <input id="li-email" type="email" autocomplete="username" placeholder="you@example.com">
+    <label for="li-pass">Password</label>
+    <input id="li-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+    <div class="msg" id="li-msg"></div>
+    <div class="row">
+      <button class="primary" id="li-go">Sign in</button>
+      <button class="ghost" id="li-cancel">Cancel</button>
+    </div>
+    <div class="forgot"><a href="#" class="link" id="li-forgot">Forgot password?</a></div>
+  </div>
+</div>
 
 <footer id="foot"></footer>
 
@@ -156,7 +193,9 @@ APPS.forEach((app, i) => {
 // public page.
 const SUPA_URL = 'https://xuipllbtrsebavtffjdy.supabase.co';
 const SUPA_KEY = 'sb_publishable_4Uc4-PMVI4Bsodk6FYYEjg_h2o5xZ0j';
-const BUDGET_SESSION_KEY = 'budgetApp.session';
+const HUB_SESSION_KEY = 'hubApp.session';       // the hub's own login
+const BUDGET_SESSION_KEY = 'budgetApp.session';  // borrowed if the hub isn't signed in
+let sessionSource = null;   // 'hub' | 'budget' — where the active session came from
 
 const money0 = n => '$' + Math.round(Math.abs(n)).toLocaleString('en-US');
 
@@ -200,13 +239,25 @@ function divAnnualIncome(row) {
            .reduce((a, h) => a + (Number(h.shares) || 0) * (Number(h.annualDiv) || 0), 0);
 }
 
-function readBudgetSession() {
-  try { const s = JSON.parse(localStorage.getItem(BUDGET_SESSION_KEY)); return (s && s.access_token && s.user) ? s : null; }
+function readKey(key) {
+  try { const s = JSON.parse(localStorage.getItem(key)); return (s && s.access_token && s.user) ? s : null; }
   catch (e) { return null; }
 }
+// The hub's own login wins; otherwise borrow the same-origin Budget session.
+function readSession() {
+  const own = readKey(HUB_SESSION_KEY);
+  if (own) { sessionSource = 'hub'; return own; }
+  const borrowed = readKey(BUDGET_SESSION_KEY);
+  if (borrowed) { sessionSource = 'budget'; return borrowed; }
+  sessionSource = null; return null;
+}
+function persistSession(sess) {
+  const key = sessionSource === 'hub' ? HUB_SESSION_KEY : BUDGET_SESSION_KEY;
+  try { localStorage.setItem(key, JSON.stringify(sess)); } catch (e) {}
+}
 
-// Refresh an expired access token WITHOUT disrupting the Budget app: we write the
-// rotated session straight back to the shared localStorage key it reads from.
+// Refresh an expired access token and write the rotated session back to whichever
+// key it came from — so neither the hub nor the Budget app gets logged out.
 async function refreshSession(sess) {
   const r = await fetch(SUPA_URL + '/auth/v1/token?grant_type=refresh_token', {
     method: 'POST',
@@ -217,8 +268,25 @@ async function refreshSession(sess) {
   const j = await r.json();
   if (!j.access_token) return null;
   const next = { access_token: j.access_token, refresh_token: j.refresh_token, user: j.user || sess.user };
-  try { localStorage.setItem(BUDGET_SESSION_KEY, JSON.stringify(next)); } catch (e) {}
+  persistSession(next);
   return next;
+}
+
+async function authSignIn(email, password) {
+  const r = await fetch(SUPA_URL + '/auth/v1/token?grant_type=password', {
+    method: 'POST',
+    headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  return r.json();
+}
+async function authRecover(email) {
+  const r = await fetch(SUPA_URL + '/auth/v1/recover', {
+    method: 'POST',
+    headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  return r.ok;
 }
 
 async function supaGet(path, token) {
@@ -227,11 +295,14 @@ async function supaGet(path, token) {
   });
 }
 
+function hideHighlight(type) { const el = slotFor(type); if (el) { el.hidden = true; el.classList.remove('skeleton'); } }
+
 async function loadHighlights() {
   const wantsDiv = APPS.some(a => a.highlight === 'divtracker');
   const wantsBud = APPS.some(a => a.highlight === 'budget');
-  let sess = readBudgetSession();
-  if (!sess) return;  // not logged into the Budget app on this device — leave cards plain
+  let sess = readSession();
+  renderAccount(sess);
+  if (!sess) { hideHighlight('divtracker'); hideHighlight('budget'); return; }  // leave cards plain until sign-in
   if (wantsDiv) showSkeleton('divtracker');
   if (wantsBud) showSkeleton('budget');
 
@@ -262,6 +333,80 @@ async function loadHighlights() {
     else { const el = slotFor('divtracker'); if (el) el.hidden = true; }
   }
 }
+// ─── Account bar + optional sign-in ──────────────────────────────────────────
+const accountEl = document.getElementById('account');
+const loginModal = document.getElementById('loginModal');
+
+function renderAccount(sess) {
+  if (sess && sessionSource === 'hub') {
+    const email = (sess.user && sess.user.email) || 'your account';
+    accountEl.innerHTML = '<span class="who">👤 ' + email + '</span><span class="who">·</span><button class="link" id="acct-out">Sign out</button>';
+    document.getElementById('acct-out').onclick = signOut;
+  } else if (sess) {
+    // Borrowed Budget session — stats show automatically; offer a switch.
+    accountEl.innerHTML = '<span class="who">Showing your stats</span><span class="who">·</span><button class="link" id="acct-in">Use a different account</button>';
+    document.getElementById('acct-in').onclick = openLogin;
+  } else {
+    accountEl.innerHTML = '<button class="link" id="acct-in">🔒 Sign in to see your stats</button>';
+    document.getElementById('acct-in').onclick = openLogin;
+  }
+}
+
+function openLogin() {
+  document.getElementById('li-msg').textContent = '';
+  document.getElementById('li-msg').className = 'msg';
+  loginModal.classList.add('show');
+  const em = document.getElementById('li-email');
+  const sess = readKey(BUDGET_SESSION_KEY);
+  if (em && !em.value && sess && sess.user) em.value = sess.user.email || '';
+  (em && !em.value ? em : document.getElementById('li-pass')).focus();
+}
+function closeLogin() { loginModal.classList.remove('show'); }
+
+async function doSignIn() {
+  const email = document.getElementById('li-email').value.trim();
+  const pass  = document.getElementById('li-pass').value;
+  const msg   = document.getElementById('li-msg');
+  const btn   = document.getElementById('li-go');
+  if (!email || !pass) { msg.className = 'msg err'; msg.textContent = 'Enter your email and password.'; return; }
+  btn.disabled = true; msg.className = 'msg'; msg.textContent = 'Signing in…';
+  try {
+    const j = await authSignIn(email, pass);
+    if (j && j.access_token && j.user) {
+      sessionSource = 'hub';
+      persistSession({ access_token: j.access_token, refresh_token: j.refresh_token, user: j.user });
+      document.getElementById('li-pass').value = '';
+      closeLogin();
+      loadHighlights();
+    } else {
+      msg.className = 'msg err';
+      msg.textContent = (j && (j.error_description || j.msg || j.error)) || 'Sign-in failed. Check your email and password.';
+    }
+  } catch (e) {
+    msg.className = 'msg err'; msg.textContent = 'Network error — please try again.';
+  } finally { btn.disabled = false; }
+}
+
+function signOut() {
+  try { localStorage.removeItem(HUB_SESSION_KEY); } catch (e) {}
+  sessionSource = null;
+  hideHighlight('divtracker'); hideHighlight('budget');
+  loadHighlights();  // may still find a borrowed Budget session
+}
+
+document.getElementById('li-go').onclick = doSignIn;
+document.getElementById('li-cancel').onclick = closeLogin;
+document.getElementById('li-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doSignIn(); });
+loginModal.addEventListener('click', e => { if (e.target === loginModal) closeLogin(); });
+document.getElementById('li-forgot').onclick = async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('li-email').value.trim();
+  const msg = document.getElementById('li-msg');
+  if (!email) { msg.className = 'msg err'; msg.textContent = 'Enter your email above first, then tap Forgot password.'; return; }
+  await authRecover(email);
+  msg.className = 'msg ok'; msg.textContent = 'If that email has an account, a reset link is on its way.';
+};
+
 loadHighlights();
 
 document.getElementById('foot').textContent = '';
