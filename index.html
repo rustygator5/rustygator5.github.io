@@ -44,6 +44,12 @@
   .icon { font-size:38px; line-height:1; margin-bottom:12px; }
   .name { font-size:18px; font-weight:700; margin-bottom:5px; display:flex; align-items:center; gap:8px; }
   .desc { font-size:13px; color:var(--text2); line-height:1.5; }
+  .highlight { margin-top:14px; display:flex; align-items:baseline; gap:8px; }
+  .highlight .num { font-size:24px; font-weight:800; letter-spacing:-.02em; color:var(--green); line-height:1; }
+  .highlight .num.neg { color:var(--amber); }
+  .highlight .unit { font-size:12px; font-weight:600; color:var(--text3); }
+  .highlight.skeleton .num { color:transparent; background:linear-gradient(90deg,var(--border),var(--bg),var(--border)); background-size:200% 100%; border-radius:6px; width:96px; height:22px; animation:shimmer 1.3s ease-in-out infinite; }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
   .status { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600; margin-top:12px; color:var(--text3); }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--text3); }
   .dot.ok { background:var(--green); }
@@ -80,12 +86,14 @@ const APPS = [
     url:  'https://divtracker-xbfw.onrender.com/divtrack.html',
     health: 'https://divtracker-xbfw.onrender.com/health',
     note: 'Sleeps when idle — opening this page wakes it.',
+    highlight: 'divtracker',
   },
   {
     icon: '💰',
     name: 'Monthly Budget',
     desc: 'Month-by-month budget, debt payoff planner, savings goals, and net-worth outlook.',
     url:  '/budget/',
+    highlight: 'budget',
   },
   {
     icon: '🥫',
@@ -104,6 +112,7 @@ APPS.forEach((app, i) => {
     '<div class="icon">' + app.icon + '</div>' +
     '<div class="name">' + app.name + '</div>' +
     '<div class="desc">' + app.desc + '</div>' +
+    (app.highlight ? '<div class="highlight" id="hl-' + i + '" hidden></div>' : '') +
     (app.health ? '<div class="status" id="st-' + i + '"><span class="dot" id="dot-' + i + '"></span><span id="lbl-' + i + '">Checking…</span></div>' : '');
   grid.appendChild(a);
 });
@@ -138,6 +147,122 @@ APPS.forEach((app, i) => {
   };
   check();
 });
+
+// ─── Live highlights ─────────────────────────────────────────────────────────
+// DivTracker and the Budget both sync to the SAME Supabase project, and the
+// Budget app is same-origin with this hub — so its saved login (in localStorage)
+// lets us read both apps' numbers for THIS user only. A visitor without that
+// login cached simply sees no numbers; nothing private is ever baked into the
+// public page.
+const SUPA_URL = 'https://xuipllbtrsebavtffjdy.supabase.co';
+const SUPA_KEY = 'sb_publishable_4Uc4-PMVI4Bsodk6FYYEjg_h2o5xZ0j';
+const BUDGET_SESSION_KEY = 'budgetApp.session';
+
+const money0 = n => '$' + Math.round(Math.abs(n)).toLocaleString('en-US');
+
+function slotFor(type) {
+  const i = APPS.findIndex(a => a.highlight === type);
+  return i > -1 ? document.getElementById('hl-' + i) : null;
+}
+function showHighlight(type, num, unit, negative) {
+  const el = slotFor(type); if (!el) return;
+  el.classList.remove('skeleton');
+  el.innerHTML = '<span class="num' + (negative ? ' neg' : '') + '">' + num + '</span><span class="unit">' + unit + '</span>';
+  el.hidden = false;
+}
+function showSkeleton(type) {
+  const el = slotFor(type); if (!el) return;
+  el.classList.add('skeleton');
+  el.innerHTML = '<span class="num">·</span>';
+  el.hidden = false;
+}
+
+// Estimated typical-month surplus from the Budget's recurring items.
+function budgetMonthlySurplus(state) {
+  if (!state || !Array.isArray(state.recurring)) return null;
+  const perMonth = { monthly: 1, biweekly: 26/12, weekly: 52/12 };
+  let surplus = 0;
+  state.recurring.forEach(it => {
+    const eq = (Number(it.amount) || 0) * (perMonth[it.freq || 'monthly'] || 1);
+    surplus += it.type === 'income' ? eq : -eq;
+  });
+  return surplus;
+}
+
+// Forward annual dividend income from a DivTracker cloud row.
+function divAnnualIncome(row) {
+  if (!row) return null;
+  const ports = row.holdings || [];
+  const activeId = row.settings && row.settings.activePortId;
+  const port = ports.find(p => p.id === activeId) || ports[0];
+  const hs = (port && port.holdings) || [];
+  return hs.filter(h => !h.sold)
+           .reduce((a, h) => a + (Number(h.shares) || 0) * (Number(h.annualDiv) || 0), 0);
+}
+
+function readBudgetSession() {
+  try { const s = JSON.parse(localStorage.getItem(BUDGET_SESSION_KEY)); return (s && s.access_token && s.user) ? s : null; }
+  catch (e) { return null; }
+}
+
+// Refresh an expired access token WITHOUT disrupting the Budget app: we write the
+// rotated session straight back to the shared localStorage key it reads from.
+async function refreshSession(sess) {
+  const r = await fetch(SUPA_URL + '/auth/v1/token?grant_type=refresh_token', {
+    method: 'POST',
+    headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: sess.refresh_token }),
+  });
+  if (!r.ok) return null;
+  const j = await r.json();
+  if (!j.access_token) return null;
+  const next = { access_token: j.access_token, refresh_token: j.refresh_token, user: j.user || sess.user };
+  try { localStorage.setItem(BUDGET_SESSION_KEY, JSON.stringify(next)); } catch (e) {}
+  return next;
+}
+
+async function supaGet(path, token) {
+  return fetch(SUPA_URL + '/rest/v1/' + path, {
+    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + token },
+  });
+}
+
+async function loadHighlights() {
+  const wantsDiv = APPS.some(a => a.highlight === 'divtracker');
+  const wantsBud = APPS.some(a => a.highlight === 'budget');
+  let sess = readBudgetSession();
+  if (!sess) return;  // not logged into the Budget app on this device — leave cards plain
+  if (wantsDiv) showSkeleton('divtracker');
+  if (wantsBud) showSkeleton('budget');
+
+  // Budget — read the same-origin cached state first (instant, offline).
+  if (wantsBud) {
+    let state = null;
+    try { state = JSON.parse(localStorage.getItem('budgetApp.data.' + sess.user.id)); } catch (e) {}
+    if (!state || !state.__budget) {
+      try { const r = await supaGet('budgets?user_id=eq.' + sess.user.id + '&select=data', sess.access_token); const rows = await r.json(); state = Array.isArray(rows) && rows[0] ? rows[0].data : null; } catch (e) {}
+    }
+    const s = budgetMonthlySurplus(state);
+    if (s !== null && isFinite(s)) showHighlight('budget', (s >= 0 ? '+' : '−') + money0(s), '/ mo left over', s < 0);
+    else { const el = slotFor('budget'); if (el) el.hidden = true; }
+  }
+
+  // DivTracker — cross-origin, so read it from Supabase with the shared token.
+  if (wantsDiv) {
+    const query = 'portfolios?user_id=eq.' + sess.user.id + '&select=holdings,settings&order=updated_at.desc&limit=1';
+    let r = await supaGet(query, sess.access_token);
+    if (r.status === 401 && sess.refresh_token) {
+      const next = await refreshSession(sess);
+      if (next) { sess = next; r = await supaGet(query, sess.access_token); }
+    }
+    let row = null;
+    if (r.ok) { const rows = await r.json(); row = Array.isArray(rows) ? rows[0] : null; }
+    const annual = divAnnualIncome(row);
+    if (annual !== null && isFinite(annual) && annual > 0) showHighlight('divtracker', money0(annual), '/ yr in dividends');
+    else { const el = slotFor('divtracker'); if (el) el.hidden = true; }
+  }
+}
+loadHighlights();
 
 document.getElementById('foot').textContent = '';
 </script>
