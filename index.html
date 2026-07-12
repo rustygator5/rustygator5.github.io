@@ -52,10 +52,11 @@
   .icon { font-size:38px; line-height:1; margin-bottom:12px; }
   .name { font-size:18px; font-weight:700; margin-bottom:5px; display:flex; align-items:center; gap:8px; }
   .desc { font-size:13px; color:var(--text2); line-height:1.5; }
-  .highlight { margin-top:14px; display:flex; align-items:baseline; gap:8px; }
+  .highlight { margin-top:14px; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
   .highlight .num { font-size:24px; font-weight:800; letter-spacing:-.02em; color:var(--green); line-height:1; }
   .highlight .num.neg { color:var(--amber); }
   .highlight .unit { font-size:12px; font-weight:600; color:var(--text3); }
+  .highlight .hl-sub { flex-basis:100%; font-size:12px; font-weight:600; color:var(--text2); margin-top:2px; }
   .highlight.skeleton .num { color:transparent; background:linear-gradient(90deg,var(--border),var(--bg),var(--border)); background-size:200% 100%; border-radius:6px; width:96px; height:22px; animation:shimmer 1.3s ease-in-out infinite; }
   @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
   .status { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600; margin-top:12px; color:var(--text3); }
@@ -169,28 +170,46 @@ ph.innerHTML = '<div class="plus">＋</div><div>Room for the next app</div>';
 grid.appendChild(ph);
 
 // Pre-warm sleeping apps and show live status: grey → amber (waking) → green (ready).
-APPS.forEach((app, i) => {
-  if (!app.health) return;
-  const dot = () => document.getElementById('dot-' + i);
-  const lbl = () => document.getElementById('lbl-' + i);
-  let attempts = 0;
-  const check = async () => {
-    attempts++;
-    try {
-      const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), 8000);
-      const r = await fetch(app.health, { signal: ctl.signal });
-      clearTimeout(t);
-      if (r.ok) { dot().className = 'dot ok'; lbl().textContent = 'Ready'; return; }
-      throw new Error(r.status);
-    } catch (e) {
-      dot().className = 'dot wake';
-      lbl().textContent = 'Waking up… (~1 min, started automatically)';
-      if (attempts < 30) setTimeout(check, 10000);
-      else { dot().className = 'dot'; lbl().textContent = 'Not responding — tap to try anyway'; }
-    }
-  };
-  check();
+// Restartable so a return-to-foreground can re-verify (the server may have gone
+// back to sleep while the app sat in the background).
+const _healthTimers = {};
+function startHealthChecks() {
+  APPS.forEach((app, i) => {
+    if (!app.health) return;
+    clearTimeout(_healthTimers[i]);
+    const dot = () => document.getElementById('dot-' + i);
+    const lbl = () => document.getElementById('lbl-' + i);
+    let attempts = 0;
+    const check = async () => {
+      attempts++;
+      try {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 8000);
+        const r = await fetch(app.health, { signal: ctl.signal });
+        clearTimeout(t);
+        if (r.ok) { dot().className = 'dot ok'; lbl().textContent = 'Ready'; return; }
+        throw new Error(r.status);
+      } catch (e) {
+        dot().className = 'dot wake';
+        lbl().textContent = 'Waking up… (~1 min, started automatically)';
+        if (attempts < 30) _healthTimers[i] = setTimeout(check, 10000);
+        else { dot().className = 'dot'; lbl().textContent = 'Not responding — tap to try anyway'; }
+      }
+    };
+    check();
+  });
+}
+startHealthChecks();
+
+// iOS keeps the installed app frozen in its last state — refresh the stats and
+// the Ready dot whenever it comes back to the foreground (throttled to 30s).
+let _lastForegroundRefresh = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (Date.now() - _lastForegroundRefresh < 30000) return;
+  _lastForegroundRefresh = Date.now();
+  startHealthChecks();
+  if (typeof loadHighlights === 'function') loadHighlights();
 });
 
 // ─── Live highlights ─────────────────────────────────────────────────────────
@@ -211,14 +230,17 @@ function slotFor(type) {
   const i = APPS.findIndex(a => a.highlight === type);
   return i > -1 ? document.getElementById('hl-' + i) : null;
 }
-function showHighlight(type, num, unit, negative) {
+function showHighlight(type, num, unit, negative, sub) {
   const el = slotFor(type); if (!el) return;
   el.classList.remove('skeleton');
-  el.innerHTML = '<span class="num' + (negative ? ' neg' : '') + '">' + num + '</span><span class="unit">' + unit + '</span>';
+  el.innerHTML = '<span class="num' + (negative ? ' neg' : '') + '">' + num + '</span><span class="unit">' + unit + '</span>' +
+    (sub ? '<span class="hl-sub">' + sub + '</span>' : '');
   el.hidden = false;
 }
 function showSkeleton(type) {
   const el = slotFor(type); if (!el) return;
+  // On a foreground refresh keep the last number visible instead of flashing a placeholder.
+  if (!el.hidden && !el.classList.contains('skeleton')) return;
   el.classList.add('skeleton');
   el.innerHTML = '<span class="num">·</span>';
   el.hidden = false;
@@ -237,14 +259,51 @@ function budgetMonthlySurplus(state) {
 }
 
 // Forward annual dividend income from a DivTracker cloud row.
-function divAnnualIncome(row) {
-  if (!row) return null;
+function activeHoldings(row) {
+  if (!row) return [];
   const ports = row.holdings || [];
   const activeId = row.settings && row.settings.activePortId;
   const port = ports.find(p => p.id === activeId) || ports[0];
-  const hs = (port && port.holdings) || [];
-  return hs.filter(h => !h.sold)
-           .reduce((a, h) => a + (Number(h.shares) || 0) * (Number(h.annualDiv) || 0), 0);
+  return ((port && port.holdings) || []).filter(h => !h.sold);
+}
+function divAnnualIncome(row) {
+  const hs = activeHoldings(row);
+  if (!hs.length && !row) return null;
+  return hs.reduce((a, h) => a + (Number(h.shares) || 0) * (Number(h.annualDiv) || 0), 0);
+}
+
+// Next expected dividend payment: project each holding's last known pay date
+// forward by its frequency until it's in the future, then take the soonest.
+function divNextPayment(row) {
+  const per = { monthly: 12, quarterly: 4, annual: 1, weekly: 52 };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let best = null;
+  activeHoldings(row).forEach(h => {
+    const sh = Number(h.shares) || 0, ad = Number(h.annualDiv) || 0;
+    if (sh <= 0 || ad <= 0 || !h.payDate) return;
+    const n = per[h.frequency] || 4;
+    const d = new Date(h.payDate + 'T00:00:00');
+    if (isNaN(d)) return;
+    let guard = 0;
+    while (d < today && guard++ < 420) {
+      if (n === 12) d.setMonth(d.getMonth() + 1);
+      else if (n === 4) d.setMonth(d.getMonth() + 3);
+      else if (n === 1) d.setFullYear(d.getFullYear() + 1);
+      else d.setDate(d.getDate() + 7);
+    }
+    const amt = sh * ad / n;
+    if (!best || d < best.date) best = { date: d, ticker: h.ticker, amt };
+  });
+  return best;
+}
+
+// Debt payoff progress across all debts in the Budget.
+function budgetDebtProgress(state) {
+  if (!state || !Array.isArray(state.debts) || !state.debts.length) return null;
+  let start = 0, cur = 0;
+  state.debts.forEach(d => { start += Number(d.starting) || 0; cur += Number(d.current) || 0; });
+  if (start <= 0) return null;
+  return { pct: Math.max(0, Math.min(100, (start - cur) / start * 100)), remaining: Math.max(0, cur) };
 }
 
 function readKey(key) {
@@ -322,7 +381,9 @@ async function loadHighlights() {
       try { const r = await supaGet('budgets?user_id=eq.' + sess.user.id + '&select=data', sess.access_token); const rows = await r.json(); state = Array.isArray(rows) && rows[0] ? rows[0].data : null; } catch (e) {}
     }
     const s = budgetMonthlySurplus(state);
-    if (s !== null && isFinite(s)) showHighlight('budget', (s >= 0 ? '+' : '−') + money0(s), '/ mo left over', s < 0);
+    const dp = budgetDebtProgress(state);
+    const dpSub = dp ? dp.pct.toFixed(0) + '% debt-free' + (dp.remaining > 0 ? ' · ' + money0(dp.remaining) + ' to go' : ' 🎉') : '';
+    if (s !== null && isFinite(s)) showHighlight('budget', (s >= 0 ? '+' : '−') + money0(s), '/ mo left over', s < 0, dpSub);
     else { const el = slotFor('budget'); if (el) el.hidden = true; }
   }
 
@@ -337,7 +398,9 @@ async function loadHighlights() {
     let row = null;
     if (r.ok) { const rows = await r.json(); row = Array.isArray(rows) ? rows[0] : null; }
     const annual = divAnnualIncome(row);
-    if (annual !== null && isFinite(annual) && annual > 0) showHighlight('divtracker', money0(annual), '/ yr in dividends');
+    const np = divNextPayment(row);
+    const npSub = np ? 'Next: ' + np.ticker + ' ~' + money0(np.amt) + ' · ' + np.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+    if (annual !== null && isFinite(annual) && annual > 0) showHighlight('divtracker', money0(annual), '/ yr in dividends', false, npSub);
     else { const el = slotFor('divtracker'); if (el) el.hidden = true; }
   }
 }
