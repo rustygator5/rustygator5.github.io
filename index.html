@@ -131,6 +131,7 @@ const APPS = [
     desc: 'Dividend portfolio tracker — income, buy advisor, market scan, payment calendar.',
     url:  'https://divtracker-xbfw.onrender.com/divtrack.html',
     health: 'https://divtracker-xbfw.onrender.com/health',
+    scanWarm: 'https://divtracker-xbfw.onrender.com/api/scan',
     note: 'Sleeps when idle — opening this page wakes it.',
     highlight: 'divtracker',
   },
@@ -207,6 +208,18 @@ function startHealthChecks() {
 }
 startHealthChecks();
 
+// Pre-warm the market scan: hitting /api/scan wakes the server AND builds its
+// (in-memory, wiped-on-sleep) scan cache in the background, so by the time you
+// open DivTracker's scan it's ready instead of computing on your first click.
+// Fire-and-forget; keepalive lets it survive navigating away from the dashboard.
+function prewarmScans() {
+  APPS.forEach(app => {
+    if (!app.scanWarm) return;
+    try { fetch(app.scanWarm, { mode: 'no-cors', keepalive: true }).catch(() => {}); } catch (e) {}
+  });
+}
+prewarmScans();
+
 // iOS keeps the installed app frozen in its last state — refresh the stats and
 // the Ready dot whenever it comes back to the foreground (throttled to 30s).
 let _lastForegroundRefresh = Date.now();
@@ -215,6 +228,7 @@ document.addEventListener('visibilitychange', () => {
   if (Date.now() - _lastForegroundRefresh < 30000) return;
   _lastForegroundRefresh = Date.now();
   startHealthChecks();
+  prewarmScans();
   if (typeof loadHighlights === 'function') loadHighlights();
 });
 
