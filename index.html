@@ -147,6 +147,7 @@ const APPS = [
     name: 'Family Schedule',
     desc: 'Kids’ activity & carpool scheduler — weekly grid, drop-off/pick-up drivers, conflict alerts. Share one link with anyone who drives.',
     url:  '/schedule/',
+    highlight: 'schedule',
   },
   {
     icon: '🥫',
@@ -236,6 +237,7 @@ document.addEventListener('visibilitychange', () => {
   startHealthChecks();
   prewarmScans();
   if (typeof loadHighlights === 'function') loadHighlights();
+  if (typeof loadScheduleHighlight === 'function') loadScheduleHighlight();
 });
 
 // ─── Live highlights ─────────────────────────────────────────────────────────
@@ -388,7 +390,9 @@ async function supaGet(path, token) {
   });
 }
 
-function hideHighlight(type) { const el = slotFor(type); if (el) { el.hidden = true; el.classList.remove('skeleton'); } }
+// Clear the contents too — a device that signs out or drops its schedule id
+// shouldn't leave personal text sitting in the DOM, even hidden.
+function hideHighlight(type) { const el = slotFor(type); if (el) { el.hidden = true; el.classList.remove('skeleton'); el.innerHTML = ''; } }
 
 async function loadHighlights() {
   const wantsDiv = APPS.some(a => a.highlight === 'divtracker');
@@ -504,7 +508,93 @@ document.getElementById('li-forgot').onclick = async (e) => {
   msg.className = 'msg ok'; msg.textContent = 'If that email has an account, a reset link is on its way.';
 };
 
+// ─── Family Schedule — next activity ─────────────────────────────────────────
+// The schedule app is same-origin, so the id of the schedule THIS device last
+// opened sits in localStorage. That id is itself the capability, so one anon
+// read gets the row. No id cached (a stranger, or a device that never opened
+// the schedule) → no numbers; nothing private is baked into the public page.
+const SCHED_LAST_ID_KEY = 'familySchedule.lastId';
+const hesc = s => String(s == null ? '' : s).replace(/[&<>"']/g, m =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+
+function schedIso(d) {
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+}
+// Mirrors the schedule app's recurrence: weekly within an optional season range,
+// or a single dated one-off.
+function schedActiveOn(a, date) {
+  const iso = schedIso(date);
+  if (a.repeat === 'once') return a.date === iso;
+  if (((date.getDay() + 6) % 7) !== a.day) return false;
+  if (a.startDate && iso < a.startDate) return false;
+  if (a.endDate && iso > a.endDate) return false;
+  return true;
+}
+// Soonest occurrence still ahead of us (or happening right now), scanning 2 weeks.
+function schedNextUp(data) {
+  if (!data || !Array.isArray(data.acts) || !data.acts.length) return null;
+  const nameOf = (list, id) => { const x = (list || []).find(v => v.id === id); return x ? x.name : ''; };
+  const now = new Date();
+  let best = null;
+  for (let off = 0; off <= 14 && !best; off++) {
+    const day = new Date(now); day.setDate(day.getDate() + off); day.setHours(0, 0, 0, 0);
+    data.acts.forEach(a => {
+      if (!schedActiveOn(a, day)) return;
+      const start = new Date(day); start.setMinutes(a.start || 0);
+      const end = new Date(day); end.setMinutes(a.end || 0);
+      if (end <= now) return;                       // already finished
+      if (!best || start < best.start) best = { start, end, a };
+    });
+  }
+  if (!best) return null;
+  const a = best.a;
+  return {
+    start: best.start,
+    kids: (a.kidIds || []).map(id => nameOf(data.kids, id)).filter(Boolean).join(' & '),
+    name: a.name,
+    place: nameOf(data.places, a.placeId),
+    driver: nameOf(data.drivers, a.dropId),
+  };
+}
+function schedWhenLabel(start, now) {
+  const d0 = new Date(now); d0.setHours(0, 0, 0, 0);
+  const d1 = new Date(start); d1.setHours(0, 0, 0, 0);
+  const days = Math.round((d1 - d0) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  return start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+async function loadScheduleHighlight() {
+  if (!APPS.some(a => a.highlight === 'schedule')) return;
+  let id = null;
+  try { id = localStorage.getItem(SCHED_LAST_ID_KEY); } catch (e) {}
+  if (!id) { hideHighlight('schedule'); return; }
+  showSkeleton('schedule');
+  let data = null;
+  try {
+    const r = await fetch(SUPA_URL + '/rest/v1/schedules?id=eq.' + encodeURIComponent(id) + '&select=data',
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY } });
+    if (r.ok) { const rows = await r.json(); data = Array.isArray(rows) && rows[0] ? rows[0].data : null; }
+  } catch (e) {}
+  if (!data) { hideHighlight('schedule'); return; }
+  const up = schedNextUp(data);
+  if (!up) { showHighlight('schedule', '—', 'nothing coming up', false, ''); return; }
+  const now = new Date();
+  const inProgress = up.start <= now;
+  const time = up.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const bits = [hesc(up.name)];
+  if (up.kids)   bits.push(hesc(up.kids));
+  if (up.place)  bits.push('📍 ' + hesc(up.place));
+  if (up.driver) bits.push('🚗 ' + hesc(up.driver));
+  showHighlight('schedule',
+    inProgress ? 'Now' : time,
+    inProgress ? 'in progress' : schedWhenLabel(up.start, now),
+    false, bits.join(' · '));
+}
+
 loadHighlights();
+loadScheduleHighlight();   // independent of sign-in — needs only the device's schedule id
 
 document.getElementById('foot').textContent = '';
 </script>
