@@ -534,6 +534,17 @@ function schedActiveOn(a, date) {
   if (a.endDate && iso > a.endDate) return false;
   return true;
 }
+// Per-date exceptions: {skip:true} cancels that day, {start,end} moves it.
+// Returns null when the activity doesn't happen on this date.
+function schedOccurrence(a, date) {
+  if (!schedActiveOn(a, date)) return null;
+  const ex = (a.except || {})[schedIso(date)];
+  if (ex && ex.skip) return null;
+  const start = (ex && ex.start != null) ? ex.start : (a.start || 0);
+  let end = (ex && ex.end != null) ? ex.end : (a.end || 0);
+  if (end <= start) end = start + 60;
+  return { start, end };
+}
 // Soonest occurrence still ahead of us (or happening right now), scanning 2 weeks.
 function schedNextUp(data) {
   if (!data || !Array.isArray(data.acts) || !data.acts.length) return null;
@@ -543,9 +554,10 @@ function schedNextUp(data) {
   for (let off = 0; off <= 14 && !best; off++) {
     const day = new Date(now); day.setDate(day.getDate() + off); day.setHours(0, 0, 0, 0);
     data.acts.forEach(a => {
-      if (!schedActiveOn(a, day)) return;
-      const start = new Date(day); start.setMinutes(a.start || 0);
-      const end = new Date(day); end.setMinutes(a.end || 0);
+      const o = schedOccurrence(a, day);
+      if (!o) return;                               // wrong day, out of season, or cancelled
+      const start = new Date(day); start.setMinutes(o.start);
+      const end = new Date(day); end.setMinutes(o.end);
       if (end <= now) return;                       // already finished
       if (!best || start < best.start) best = { start, end, a };
     });
