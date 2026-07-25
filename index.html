@@ -570,7 +570,34 @@ function schedNextUp(data) {
     name: a.name,
     place: nameOf(data.places, a.placeId),
     driver: nameOf(data.drivers, a.dropId),
+    leaveBy: schedLeaveBy(data, a, best.start),
   };
+}
+// "Leave by" for the drop-off: start − drive time − the family's early cushion.
+// Uses the cached Google duration, else a 30 mph estimate from the cached miles.
+function schedNormAddr(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+function schedLookup(map, o, d) {
+  if (!map) return null;
+  const a = map[schedNormAddr(o) + '||' + schedNormAddr(d)];
+  if (typeof a === 'number') return a;
+  const b = map[schedNormAddr(d) + '||' + schedNormAddr(o)];
+  return typeof b === 'number' ? b : null;
+}
+function schedLeaveBy(data, a, startDate) {
+  if (!a.trans || !a.dropId) return null;
+  const addrOf = id => { const p = (data.places || []).find(x => x.id === id); return p ? p.address : ''; };
+  const drv = (data.drivers || []).find(x => x.id === a.dropId);
+  const oAddr = addrOf(a.dropFromId || (drv && drv.homePlaceId));
+  const dAddr = addrOf(a.placeId);
+  if (!oAddr || !dAddr) return null;
+  let mins = schedLookup(data.timeCache, oAddr, dAddr);
+  if (mins == null) {
+    const mi = (a.distMiles != null) ? a.distMiles : schedLookup(data.distCache, oAddr, dAddr);
+    if (mi == null) return null;
+    mins = Math.max(1, Math.round(mi / 30 * 60));
+  }
+  const early = (data.arriveEarly != null && isFinite(+data.arriveEarly)) ? +data.arriveEarly : 15;
+  return new Date(startDate.getTime() - (mins + early) * 60000);
 }
 function schedWhenLabel(start, now) {
   const d0 = new Date(now); d0.setHours(0, 0, 0, 0);
@@ -598,7 +625,11 @@ async function loadScheduleHighlight() {
   const now = new Date();
   const inProgress = up.start <= now;
   const time = up.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  const bits = [hesc(up.name)];
+  const bits = [];
+  if (up.leaveBy && up.leaveBy > now) {
+    bits.push('🕑 Leave by <b>' + up.leaveBy.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '</b>');
+  }
+  bits.push(hesc(up.name));
   if (up.kids)   bits.push(hesc(up.kids));
   if (up.place)  bits.push('📍 ' + hesc(up.place));
   if (up.driver) bits.push('🚗 ' + hesc(up.driver));
