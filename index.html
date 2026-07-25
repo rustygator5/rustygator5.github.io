@@ -526,7 +526,10 @@ function schedIso(d) {
 function schedActiveOn(a, date) {
   const iso = schedIso(date);
   if (a.repeat === 'once') return a.date === iso;
-  if (((date.getDay() + 6) % 7) !== a.day) return false;
+  // days[] is canonical (an activity can repeat on several weekdays); older rows
+  // written before that carry a single `day`.
+  const days = Array.isArray(a.days) && a.days.length ? a.days : (a.day != null ? [a.day] : []);
+  if (!days.includes((date.getDay() + 6) % 7)) return false;
   if (a.startDate && iso < a.startDate) return false;
   if (a.endDate && iso > a.endDate) return false;
   return true;
