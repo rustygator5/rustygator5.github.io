@@ -543,7 +543,11 @@ function schedOccurrence(a, date) {
   const start = (ex && ex.start != null) ? ex.start : (a.start || 0);
   let end = (ex && ex.end != null) ? ex.end : (a.end || 0);
   if (end <= start) end = start + 60;
-  return { start, end };
+  // A TBD activity keeps a placeholder start/end in the data. Pinning one date
+  // via the exception map gives that date a real time; without one there is no
+  // time to show. Kept in sync with occurrenceOn() in the schedule app.
+  const pinned = !!(a.tbd && ex && ex.start != null);
+  return { start, end, tbd: !!a.tbd && !pinned };
 }
 // Soonest occurrence still ahead of us (or happening right now), scanning 2 weeks.
 function schedNextUp(data) {
@@ -556,6 +560,9 @@ function schedNextUp(data) {
     data.acts.forEach(a => {
       const o = schedOccurrence(a, day);
       if (!o) return;                               // wrong day, out of season, or cancelled
+      if (o.tbd) return;                            // no time yet — this card is built around a
+                                                    // clock time, and a placeholder would read as
+                                                    // a real one. The schedule app flags these.
       const start = new Date(day); start.setMinutes(o.start);
       const end = new Date(day); end.setMinutes(o.end);
       if (end <= now) return;                       // already finished
