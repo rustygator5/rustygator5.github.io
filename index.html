@@ -547,7 +547,10 @@ function schedOccurrence(a, date) {
   // via the exception map gives that date a real time; without one there is no
   // time to show. Kept in sync with occurrenceOn() in the schedule app.
   const pinned = !!(a.tbd && ex && ex.start != null);
-  return { start, end, tbd: !!a.tbd && !pinned };
+  // kidsOut = children sitting this date out; all of them out ⇒ nothing happens
+  const kidsOut = (ex && Array.isArray(ex.kidsOut)) ? ex.kidsOut : [];
+  if ((a.kidIds || []).length && a.kidIds.every(id => kidsOut.includes(id))) return null;
+  return { start, end, tbd: !!a.tbd && !pinned, kidsOut };
 }
 // Soonest occurrence still ahead of us (or happening right now), scanning 2 weeks.
 function schedNextUp(data) {
@@ -566,14 +569,15 @@ function schedNextUp(data) {
       const start = new Date(day); start.setMinutes(o.start);
       const end = new Date(day); end.setMinutes(o.end);
       if (end <= now) return;                       // already finished
-      if (!best || start < best.start) best = { start, end, a };
+      if (!best || start < best.start) best = { start, end, a, kidsOut: o.kidsOut || [] };
     });
   }
   if (!best) return null;
   const a = best.a;
   return {
     start: best.start,
-    kids: (a.kidIds || []).map(id => nameOf(data.kids, id)).filter(Boolean).join(' & '),
+    kids: (a.kidIds || []).filter(id => !best.kidsOut.includes(id))
+      .map(id => nameOf(data.kids, id)).filter(Boolean).join(' & '),
     name: a.name,
     place: nameOf(data.places, a.placeId),
     driver: nameOf(data.drivers, a.dropId),
