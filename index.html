@@ -580,7 +580,8 @@ function schedNextUp(data) {
       .map(id => nameOf(data.kids, id)).filter(Boolean).join(' & '),
     name: a.name,
     place: nameOf(data.places, a.placeId),
-    driver: nameOf(data.drivers, a.dropId),
+    // no drop-off leg ⇒ name whoever actually collects them
+    driver: nameOf(data.drivers, a.dropId === '__noleg__' ? a.pickId : a.dropId),
     leaveBy: schedLeaveBy(data, a, best.start),
   };
 }
@@ -595,7 +596,8 @@ function schedLookup(map, o, d) {
   return typeof b === 'number' ? b : null;
 }
 function schedLeaveBy(data, a, startDate) {
-  if (!a.trans || !a.dropId) return null;
+  // '__noleg__' = no drop-off happens (already there), so there's no departure
+  if (!a.trans || !a.dropId || a.dropId === '__noleg__') return null;
   const addrOf = id => { const p = (data.places || []).find(x => x.id === id); return p ? p.address : ''; };
   const drv = (data.drivers || []).find(x => x.id === a.dropId);
   const oAddr = addrOf(a.dropFromId || (drv && drv.homePlaceId));
