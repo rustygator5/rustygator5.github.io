@@ -1,0 +1,59 @@
+name: Keep DivTracker warm
+
+# Render's free tier puts a service to sleep after ~15 minutes idle, so the first
+# visit afterwards eats a 30-60s cold start. Pinging /health on a schedule keeps
+# the instance awake.
+#
+# WHY THIS LIVES IN THE HUB REPO RATHER THAN divtracker:
+# GitHub bills a 1-MINUTE MINIMUM per job run, and a 10-minute ping is ~4,300
+# job-minutes/month. Private repos only get 2,000 free minutes/month, so putting
+# this in the (private) divtracker repo would blow the allowance. Public repos get
+# UNLIMITED Actions minutes, and this repo is public. It also fits thematically:
+# the hub already pre-warms DivTracker in the browser on page load.
+
+on:
+  schedule:
+    # Every 10 minutes, 11:00-03:59 UTC (~7am-11pm US Eastern).
+    #
+    # Interval: Render sleeps at ~15 min idle. GitHub does not guarantee punctual
+    # scheduled runs and can delay them several minutes under load, so 10 minutes
+    # leaves margin against that 15-minute timer.
+    #
+    # Not 24/7 on purpose: Render's free tier allows 750 instance-hours/month and
+    # a service only burns hours while AWAKE. Warming ~17h/day uses ~520h/month
+    # and leaves headroom; going 24/7 would sit at ~730h with almost none spare.
+    # The tradeoff is a cold start if you open the app in the middle of the night.
+    - cron: '*/10 11-23,0-3 * * *'
+  workflow_dispatch:        # manual "wake it up now" button in the Actions tab
+
+permissions:
+  contents: read            # this job only makes an outbound request
+
+concurrency:
+  # If a run is somehow still going when the next fires, drop the older one
+  # rather than stacking pings.
+  group: keep-divtracker-warm
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping DivTracker /health
+        run: |
+          URL="https://divtracker-xbfw.onrender.com/health"
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$URL" || echo 000)
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "DivTracker is awake."
+              exit 0
+            fi
+            sleep 20
+          done
+          # Deliberately does NOT fail the job. A waking instance can take 30-60s,
+          # and Render has brief blips; a red X here would just generate noise
+          # email for something the next run fixes on its own. The warning still
+          # shows in the Actions tab if you go looking.
+          echo "::warning::DivTracker did not return 200 after 3 attempts"
