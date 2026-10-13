@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1D57A8">
+<style>body{margin:0}[hidden]{display:none!important}.home{font-size:13px;color:var(--accent);text-decoration:none}.home:hover{text-decoration:underline}</style>
+<title>Car Payment Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: two-column workbench — deal inputs on the left, the payment "window sticker" on the right; stacks on phones */
+:root {
+  --bg: #EDEFF1;
+  --panel: #FFFFFF;
+  --ink: #161A1F;
+  --muted: #5B6470;
+  --line: #D5DAE0;
+  --accent: #1D57A8;
+  --accent-soft: #E3ECF8;
+  --interest: #D9822B;
+  --good: #2E7D4F;
+  --warn: #B4472E;
+  --display: "Saira Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --panel: #1A1F25; --ink: #E7EAEE; --muted: #98A2AE; --line: #2C333C;
+    --accent: #7FA8E8; --accent-soft: #1E2B3D; --interest: #E8A25A; --good: #6CC191; --warn: #E8846C;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --panel: #1A1F25; --ink: #E7EAEE; --muted: #98A2AE; --line: #2C333C;
+  --accent: #7FA8E8; --accent-soft: #1E2B3D; --interest: #E8A25A; --good: #6CC191; --warn: #E8846C;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 48px; display: grid; gap: 24px; }
+header h1 { font-family: var(--display); font-weight: 700; font-size: clamp(28px, 4vw, 38px); letter-spacing: .01em; margin: 0; text-wrap: balance; }
+header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 24px; align-items: start; }
+@media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+
+.inputs { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 20px; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 12px; }
+legend { font-family: var(--display); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 0; margin-bottom: 10px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 420px) { .row2 { grid-template-columns: 1fr; } }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field label { font-size: 13px; font-weight: 500; }
+.field small { color: var(--muted); font-size: 12px; }
+.box { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); }
+.box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.box span { color: var(--muted); padding: 0 10px; font-family: var(--mono); font-size: 14px; }
+.box input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: 500 16px var(--mono); padding: 10px 10px 10px 0; outline: none; font-variant-numeric: tabular-nums; }
+.box span:first-child + input { padding-left: 0; }
+.box input:first-child { padding-left: 12px; }
+.terms { display: flex; flex-wrap: wrap; gap: 6px; }
+.terms button { font: 500 14px var(--mono); border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 7px 11px; cursor: pointer; }
+.terms button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+.terms button:focus-visible, .reset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.reset { justify-self: start; font: 500 13px var(--body); background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
+
+.results { display: grid; gap: 20px; min-width: 0; }
+.sticker { background: var(--panel); border: 1px solid var(--line); border-top: 6px solid var(--accent); border-radius: 10px; padding: 22px; display: grid; gap: 18px; }
+.eyebrow { font-family: var(--display); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.payment { font-family: var(--display); font-weight: 700; font-size: clamp(48px, 9vw, 72px); line-height: 1; font-variant-numeric: tabular-nums; }
+.payment small { font-size: .35em; font-weight: 500; color: var(--muted); margin-left: 4px; }
+.sub { color: var(--muted); margin-top: 6px; }
+.bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--line); }
+.bar i { display: block; height: 100%; transition: width .25s ease; }
+.bar .p { background: var(--accent); } .bar .int { background: var(--interest); }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+.legend b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+dl { margin: 0; display: grid; }
+dl div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+dl div:last-child { border-bottom: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+dl .total { border-top: 2px solid var(--ink); border-bottom: 0; margin-top: 4px; padding-top: 10px; }
+dl .total dt, dl .total dd { color: var(--ink); font-weight: 600; }
+.neg { color: var(--good); }
+.note { font-size: 13px; padding: 10px 12px; border-radius: 7px; background: var(--accent-soft); }
+.note.warn { color: var(--warn); }
+
+.compare { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+.compare h2 { font-family: var(--display); font-weight: 600; font-size: 18px; margin: 0 0 4px; }
+.compare p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 8px 10px; text-align: right; white-space: nowrap; }
+th { font: 600 12px var(--display); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; }
+td { font-family: var(--mono); font-size: 14px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+tr.sel td { background: var(--accent-soft); font-weight: 600; }
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: var(--accent-soft); }
+.mode { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; }
+.mode button { font: 600 14px var(--display); letter-spacing: .02em; border: 0; border-radius: 6px; padding: 9px 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.mode button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.mode button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.field.quote .box { border-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <a class="home" href="/">← Wilson Dashboard</a>
+    <h1>Car Payment Planner</h1>
+    <p>Work out the payment for a deal, or start from the salesman's monthly quote and see what car price it actually works out to.</p>
+  </header>
+
+  <div class="grid">
+    <form class="inputs" id="form" autocomplete="off">
+      <div class="mode" role="group" aria-label="Calculator mode">
+        <button type="button" id="modeFwd" data-mode="forward">Find my payment</button>
+        <button type="button" id="modeRev" data-mode="reverse">Check a dealer quote</button>
+      </div>
+
+      <fieldset>
+        <legend>The car</legend>
+        <div class="field">
+          <label for="price" id="priceLabel">Total cost (vehicle price)</label>
+          <div class="box"><span>$</span><input id="price" inputmode="decimal" value="32,500"></div>
+          <small id="priceHint" hidden>The price you negotiated. Optional: fill it in to see whether the quote matches it.</small>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label for="tax">Sales tax</label>
+            <div class="box"><input id="tax" inputmode="decimal" value="7"><span>%</span></div>
+            <small>FL is 6% plus county surtax</small>
+          </div>
+          <div class="field">
+            <label for="fees">Dealer &amp; tag fees</label>
+            <div class="box"><span>$</span><input id="fees" inputmode="decimal" value="1,200"></div>
+            <small>Doc fee, title, registration</small>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>What you're putting in</legend>
+        <div class="row2">
+          <div class="field">
+            <label for="down">Down payment</label>
+            <div class="box"><span>$</span><input id="down" inputmode="decimal" value="4,000"></div>
+          </div>
+          <div class="field">
+            <label for="trade">Trade-in value</label>
+            <div class="box"><span>$</span><input id="trade" inputmode="decimal" value="8,000"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="owed">Still owed on trade-in</label>
+          <div class="box"><span>$</span><input id="owed" inputmode="decimal" value="0"></div>
+          <small>Loan payoff on your current car, if any. Leave 0 if it's paid off.</small>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>The loan</legend>
+        <div class="field quote" id="quoteField" hidden>
+          <label for="quote">Monthly payment the dealer quoted</label>
+          <div class="box"><span>$</span><input id="quote" inputmode="decimal" value="550"></div>
+        </div>
+        <div class="field">
+          <label for="apr">APR</label>
+          <div class="box"><input id="apr" inputmode="decimal" value="6.9"><span>%</span></div>
+        </div>
+        <div class="field">
+          <label for="months"># of months financed</label>
+          <div class="box"><input id="months" inputmode="numeric" value="60"><span>months</span></div>
+          <div class="terms" id="terms" role="group" aria-label="Common loan terms">
+            <button type="button" data-m="36">36</button>
+            <button type="button" data-m="48">48</button>
+            <button type="button" data-m="60">60</button>
+            <button type="button" data-m="72">72</button>
+            <button type="button" data-m="84">84</button>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <div class="field">
+          <label for="taxTrade" style="display:flex;gap:8px;align-items:flex-start;font-weight:400">
+            <input type="checkbox" id="taxTrade" checked style="margin-top:4px">
+            <span>Trade-in lowers the taxed amount <small style="display:block">True in Florida and most states. Tax is charged on price minus trade-in.</small></span>
+          </label>
+        </div>
+      </fieldset>
+
+      <button type="button" class="reset" id="reset">Reset to example deal</button>
+    </form>
+
+    <section class="results" aria-live="polite">
+      <div class="sticker">
+        <div>
+          <div class="eyebrow" id="bigLabel">Monthly payment</div>
+          <div class="payment" id="pay">$0<small>/mo</small></div>
+          <div class="sub" id="paySub"></div>
+        </div>
+
+        <div>
+          <div class="bar" aria-hidden="true"><i class="p" id="barP"></i><i class="int" id="barI"></i></div>
+          <div class="legend">
+            <span><b style="background:var(--accent)"></b>Amount financed <span id="lgP"></span></span>
+            <span><b style="background:var(--interest)"></b>Interest <span id="lgI"></span></span>
+          </div>
+        </div>
+
+        <dl id="breakdown"></dl>
+        <div class="note" id="note" hidden></div>
+      </div>
+
+      <div class="compare" id="compareCard">
+        <h2>Compare loan lengths</h2>
+        <p>Same deal and APR at different terms. Tap a row to use it.</p>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Term</th><th>Monthly</th><th>Total interest</th><th>Total paid</th></tr></thead>
+            <tbody id="cmp"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const IDS = ["price", "tax", "fees", "down", "trade", "owed", "apr", "months", "quote"];
+const DEFAULTS = { price: "32,500", tax: "7", fees: "1,200", down: "4,000", trade: "8,000", owed: "0", apr: "6.9", months: "60", quote: "550", taxTrade: true };
+let mode = "forward";
+const KEY = "carPaymentPlanner.v1";
+const $ = id => document.getElementById(id);
+const usd = (n, cents = false) => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 });
+const num = id => { const v = parseFloat(String($(id).value).replace(/[^0-9.]/g, "")); return isFinite(v) ? v : 0; };
+
+function payment(principal, apr, n) {
+  if (principal <= 0 || n <= 0) return 0;
+  const r = apr / 100 / 12;
+  if (r === 0) return principal / n;
+  return principal * r / (1 - Math.pow(1 + r, -n));
+}
+
+function deal() {
+  const price = num("price"), taxRate = num("tax"), fees = num("fees"), down = num("down"),
+        trade = num("trade"), owed = num("owed"), apr = num("apr"), months = Math.round(num("months"));
+  const taxable = $("taxTrade").checked ? Math.max(0, price - trade) : price;
+  const tax = taxable * taxRate / 100;
+  const equity = trade - owed;               // negative = rolled into the new loan
+  const financed = price + tax + fees - down - equity;
+  return { price, taxRate, fees, down, trade, owed, apr, months, tax, equity, financed: Math.max(0, financed), cashBack: Math.max(0, -financed) };
+}
+
+// Present value of a payment stream: the loan amount a monthly payment covers
+function principalFor(pay, apr, n) {
+  if (pay <= 0 || n <= 0) return 0;
+  const r = apr / 100 / 12;
+  if (r === 0) return pay * n;
+  return pay * (1 - Math.pow(1 + r, -n)) / r;
+}
+
+// Solve financed = price + tax(price) + fees − down − (trade − owed) for price
+function priceFor(financed, d) {
+  const t = d.taxRate / 100, rest = financed - d.fees + d.down + d.trade - d.owed;
+  if (!$("taxTrade").checked) return rest / (1 + t);
+  const p = (rest + t * d.trade) / (1 + t);
+  return p >= d.trade ? p : rest;           // below the trade value, nothing is taxed
+}
+
+function render() {
+  const fwd = mode === "forward";
+  $("modeFwd").setAttribute("aria-pressed", String(fwd));
+  $("modeRev").setAttribute("aria-pressed", String(!fwd));
+  $("quoteField").hidden = fwd;
+  $("priceHint").hidden = fwd;
+  $("compareCard").hidden = !fwd;
+  $("priceLabel").textContent = fwd ? "Total cost (vehicle price)" : "Price you agreed on";
+  $("bigLabel").textContent = fwd ? "Monthly payment" : "Car price this payment works out to";
+  if (fwd) renderForward(); else renderReverse();
+  document.querySelectorAll("#terms button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.m === Math.round(num("months")))));
+  save();
+}
+
+function renderReverse() {
+  const d = deal(), quote = num("quote");
+  const financed = principalFor(quote, d.apr, d.months);
+  const price = Math.max(0, priceFor(financed, d));
+  const taxable = $("taxTrade").checked ? Math.max(0, price - d.trade) : price;
+  const tax = taxable * d.taxRate / 100;
+  const totalPaid = quote * d.months;
+  const interest = Math.max(0, totalPaid - financed);
+
+  $("pay").innerHTML = usd(price, true);
+  $("paySub").textContent = d.months > 0
+    ? `From ${usd(quote, true)}/mo for ${d.months} months at ${d.apr}% APR, after your down payment, trade-in, tax and fees`
+    : "Enter how many months you're financing.";
+
+  const total = financed + interest || 1;
+  $("barP").style.width = (financed / total * 100) + "%";
+  $("barI").style.width = (interest / total * 100) + "%";
+  $("lgP").textContent = usd(financed);
+  $("lgI").textContent = usd(interest);
+
+  const rows = [
+    ["Vehicle price (worked out)", usd(price, true)],
+    [`Sales tax (${d.taxRate}%)`, "+ " + usd(tax, true)],
+    ["Dealer & tag fees", "+ " + usd(d.fees, true)],
+    ["Down payment", "− " + usd(d.down, true), "neg"],
+    ["Trade-in value", "− " + usd(d.trade, true), "neg"],
+  ];
+  if (d.owed > 0) rows.push(["Payoff on trade-in", "+ " + usd(d.owed, true)]);
+  rows.push(["Amount financed", usd(financed, true)]);
+  rows.push(["Total interest", usd(interest, true)]);
+  rows.push(["Car really costs you", usd(d.down + Math.max(0, d.equity) + totalPaid, true), "total"]);
+  $("breakdown").innerHTML = rows.map(([k, v, c]) =>
+    `<div class="${c === "total" ? "total" : ""}"><dt>${k}</dt><dd class="${c === "neg" ? "neg" : ""}">${v}</dd></div>`).join("");
+
+  const note = $("note");
+  if (d.price > 0 && quote > 0 && d.months > 0) {
+    const diff = price - d.price;
+    const fair = payment(d.financed, d.apr, d.months);
+    note.hidden = false;
+    if (diff > 1) {
+      note.className = "note warn";
+      note.textContent = `This payment works out to ${usd(diff)} more than the ${usd(d.price)} you agreed on. At that price the payment should be ${usd(fair, true)}/mo, which is ${usd(quote - fair, true)}/mo less. Ask what was added: extended warranty, GAP insurance, paint or tire protection, or a different APR or trade-in value than you were told.`;
+    } else if (diff < -1) {
+      note.className = "note";
+      note.textContent = `This payment works out to ${usd(-diff)} less than the ${usd(d.price)} you agreed on. Double-check that the APR, term, trade-in and down payment match the paperwork.`;
+    } else {
+      note.className = "note";
+      note.textContent = `This payment matches the ${usd(d.price)} price you agreed on. Nothing appears to have been added.`;
+    }
+  } else {
+    note.hidden = true;
+  }
+}
+
+function renderForward() {
+  const d = deal();
+  const pay = payment(d.financed, d.apr, d.months);
+  const totalPaid = pay * d.months;
+  const interest = Math.max(0, totalPaid - d.financed);
+
+  $("pay").innerHTML = usd(pay, true) + "<small>/mo</small>";
+  $("paySub").textContent = d.months > 0
+    ? `${d.months} payments at ${d.apr}% APR · ${(d.months / 12).toFixed(d.months % 12 ? 1 : 0)} years`
+    : "Enter how many months you're financing.";
+
+  const total = d.financed + interest || 1;
+  $("barP").style.width = (d.financed / total * 100) + "%";
+  $("barI").style.width = (interest / total * 100) + "%";
+  $("lgP").textContent = usd(d.financed);
+  $("lgI").textContent = usd(interest);
+
+  const rows = [
+    ["Vehicle price", usd(d.price, true)],
+    [`Sales tax (${d.taxRate}%)`, "+ " + usd(d.tax, true)],
+    ["Dealer & tag fees", "+ " + usd(d.fees, true)],
+    ["Down payment", "− " + usd(d.down, true), "neg"],
+    ["Trade-in value", "− " + usd(d.trade, true), "neg"],
+  ];
+  if (d.owed > 0) rows.push(["Payoff on trade-in", "+ " + usd(d.owed, true)]);
+  rows.push(["Amount financed", usd(d.financed, true)]);
+  rows.push(["Total interest", usd(interest, true)]);
+  const outOfPocket = d.down + Math.max(0, d.equity) + totalPaid;
+  rows.push(["Car really costs you", usd(outOfPocket, true), "total"]);
+  $("breakdown").innerHTML = rows.map(([k, v, c]) =>
+    `<div class="${c === "total" ? "total" : ""}"><dt>${k}</dt><dd class="${c === "neg" ? "neg" : ""}">${v}</dd></div>`).join("");
+
+  const note = $("note");
+  if (d.equity < 0) {
+    note.hidden = false; note.className = "note warn";
+    note.textContent = `You owe ${usd(-d.equity)} more on your trade-in than it's worth. That negative equity is rolled into this loan and you'll pay interest on it.`;
+  } else if (d.cashBack > 0) {
+    note.hidden = false; note.className = "note";
+    note.textContent = `Your down payment and trade-in cover the whole deal with ${usd(d.cashBack)} to spare. Nothing to finance.`;
+  } else if (d.months > 72) {
+    note.hidden = false; note.className = "note warn";
+    note.textContent = "Loans over 72 months lower the payment but cost much more in interest, and you're more likely to owe more than the car is worth.";
+  } else {
+    note.hidden = true;
+  }
+
+  const terms = [36, 48, 60, 72, 84];
+  if (d.months > 0 && !terms.includes(d.months)) terms.push(d.months), terms.sort((a, b) => a - b);
+  $("cmp").innerHTML = terms.map(m => {
+    const p = payment(d.financed, d.apr, m), tp = p * m;
+    return `<tr data-m="${m}" class="${m === d.months ? "sel" : ""}" tabindex="0"><td>${m} mo</td><td>${usd(p, true)}</td><td>${usd(Math.max(0, tp - d.financed))}</td><td>${usd(tp)}</td></tr>`;
+  }).join("");
+}
+
+function save() {
+  try {
+    const s = {}; IDS.forEach(id => s[id] = $(id).value); s.taxTrade = $("taxTrade").checked; s.mode = mode;
+    localStorage.setItem(KEY, JSON.stringify(s));
+  } catch (e) {}
+}
+function load(src) {
+  IDS.forEach(id => { if (src[id] != null) $(id).value = src[id]; });
+  if (src.taxTrade != null) $("taxTrade").checked = !!src.taxTrade;
+  if (src.mode === "forward" || src.mode === "reverse") mode = src.mode;
+}
+function setMonths(m) { $("months").value = m; render(); }
+
+try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) load(s); } catch (e) {}
+
+// Add thousands separators when leaving a dollar field
+document.querySelector(".mode").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { mode = b.dataset.mode; render(); } });
+["price", "fees", "down", "trade", "owed", "quote"].forEach(id => $(id).addEventListener("blur", () => {
+  const v = num(id); $(id).value = v.toLocaleString("en-US", { maximumFractionDigits: 2 }); save();
+}));
+$("form").addEventListener("input", render);
+$("form").addEventListener("submit", e => e.preventDefault());
+$("terms").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setMonths(+b.dataset.m); });
+$("cmp").addEventListener("click", e => { const r = e.target.closest("tr"); if (r) setMonths(+r.dataset.m); });
+$("cmp").addEventListener("keydown", e => { const r = e.target.closest("tr"); if (r && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setMonths(+r.dataset.m); } });
+$("reset").addEventListener("click", () => { load(DEFAULTS); render(); });
+render();
+</script>
