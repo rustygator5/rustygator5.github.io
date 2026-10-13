@@ -159,6 +159,14 @@ tbody tr:hover td { background: var(--accent-soft); }
 .btn.danger.armed { background: var(--warn); color: var(--panel); border-color: var(--warn); }
 .tag { font-size: 12px; font-weight: 600; }
 .tag.warn { color: var(--warn); } .tag.good { color: var(--good); }
+.sync { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 12px; }
+.syncline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.ok { background: var(--good); } .dot.busy { background: var(--interest); } .dot.bad { background: var(--warn); }
+.signin { display: grid; gap: 10px; max-width: 560px; }
+.signin small { color: var(--muted); font-size: 12px; }
+.siacts { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+#siEmail, #siPw { font-family: var(--body); }
 
 .scanner { position: fixed; inset: 0; z-index: 50; background: #000; display: grid; grid-template-rows: 1fr auto; }
 .scanner video { width: 100%; height: 100%; object-fit: cover; min-height: 0; }
@@ -344,6 +352,18 @@ tbody tr:hover td { background: var(--accent-soft); }
     </div>
     <div class="vstatus" id="savedStatus">Saves the VIN lookup, fair price and every number in the deal. Cars are kept on this device.</div>
     <ul class="savedlist" id="savedList"></ul>
+    <div class="sync">
+      <div class="syncline"><span class="dot" id="syncDot" aria-hidden="true"></span><span id="syncText">Saved on this device only.</span>
+        <button type="button" class="reset" id="syncAct">Sign in to sync</button></div>
+      <form class="signin" id="signinForm" hidden>
+        <div class="row2">
+          <div class="field"><label for="siEmail">Email</label><div class="box"><input id="siEmail" type="email" autocomplete="username" spellcheck="false"></div></div>
+          <div class="field"><label for="siPw">Password</label><div class="box"><input id="siPw" type="password" autocomplete="current-password"></div></div>
+        </div>
+        <div class="siacts"><button type="submit" class="btn" id="siBtn">Sign in</button><button type="button" class="reset" id="siForgot">Forgot password?</button></div>
+        <small id="siMsg">Use the same account as your Budget app. Your saved cars then show up on every device you sign in on.</small>
+      </form>
+    </div>
   </section>
 </div>
 
@@ -711,7 +731,7 @@ function saveCar() {
   currentId = item.id;
   if (!persistSaved()) { savedStatus("This browser wouldn't save. Private browsing blocks saving; try a normal window.", true); return; }
   savedStatus(existing ? `Updated “${name}”.` : `Saved “${name}”.`);
-  renderSaved(); save();
+  renderSaved(); save(); syncNow();
 }
 
 function openCar(id) {
@@ -745,8 +765,10 @@ function deleteCar(id, btn) {
   armed = null;
   const c = saved.find(x => x.id === id);
   saved = saved.filter(x => x.id !== id);
+  tomb[id] = new Date().toISOString();
+  try { localStorage.setItem(TOMB_KEY, JSON.stringify(tomb)); } catch (e) {}
   if (currentId === id) currentId = null;
-  persistSaved(); renderSaved(); save();
+  persistSaved(); renderSaved(); save(); syncNow();
   savedStatus(`Deleted “${c ? c.name : "car"}”.`);
 }
 
@@ -776,10 +798,127 @@ function renderSaved() {
   }).join("");
 }
 
+/* ---------- Sync across devices (Supabase, signed in with the Budget/dashboard account) ---------- */
+const SUPA_URL = "https://xuipllbtrsebavtffjdy.supabase.co", SUPA_KEY = "sb_publishable_4Uc4-PMVI4Bsodk6FYYEjg_h2o5xZ0j";
+const AUTH = SUPA_URL + "/auth/v1", REST = SUPA_URL + "/rest/v1", H = { apikey: SUPA_KEY, "Content-Type": "application/json" };
+const SESSION_KEYS = ["hubApp.session", "budgetApp.session"];   // same site, so reuse an existing sign-in
+const TOMB_KEY = "carPaymentPlanner.deleted.v1";
+let session = null, sessionKey = null, syncing = false, lastSync = 0;
+let tomb = {};
+try { tomb = JSON.parse(localStorage.getItem(TOMB_KEY) || "{}") || {}; } catch (e) { tomb = {}; }
+
+function readSession() {
+  for (const k of SESSION_KEYS) {
+    try { const s = JSON.parse(localStorage.getItem(k) || "null"); if (s && s.access_token && s.user) { session = s; sessionKey = k; return; } } catch (e) {}
+  }
+  session = null; sessionKey = null;
+}
+function writeSession(s) {
+  session = { access_token: s.access_token, refresh_token: s.refresh_token, user: s.user };
+  sessionKey = sessionKey || SESSION_KEYS[0];
+  try { localStorage.setItem(sessionKey, JSON.stringify(session)); } catch (e) {}
+}
+async function refreshSession() {
+  if (!session || !session.refresh_token) return false;
+  try {
+    const r = await fetch(AUTH + "/token?grant_type=refresh_token", { method: "POST", headers: H, body: JSON.stringify({ refresh_token: session.refresh_token }) });
+    if (!r.ok) return false;
+    const s = await r.json(); if (s && s.access_token) { writeSession(s); return true; }
+  } catch (e) {}
+  return false;
+}
+async function api(path, opts = {}, retry = true) {
+  const r = await fetch(REST + path, { ...opts, headers: { ...H, Authorization: "Bearer " + session.access_token, ...(opts.headers || {}) } });
+  if (r.status === 401 && retry && await refreshSession()) return api(path, opts, false);
+  return r;
+}
+
+function setSync(kind, text) {
+  $("syncDot").className = "dot" + ({ ok: " ok", busy: " busy", bad: " bad" }[kind] || "");
+  $("syncText").textContent = text;
+  $("syncAct").hidden = !!session && kind !== "expired";
+  $("syncAct").textContent = "Sign in to sync";
+}
+
+// Combine two copies car by car: the newer save wins, and a delete beats any save made before it
+function mergeCars(remote) {
+  const t = { ...tomb };
+  for (const [id, ts] of Object.entries(remote.deleted || {})) if (!t[id] || ts > t[id]) t[id] = ts;
+  const byId = {};
+  for (const c of [...(remote.cars || []), ...saved]) if (!byId[c.id] || c.savedAt > byId[c.id].savedAt) byId[c.id] = c;
+  const cutoff = new Date(Date.now() - 90 * 864e5).toISOString();
+  for (const id of Object.keys(t)) if (t[id] < cutoff) delete t[id];
+  const cars = Object.values(byId).filter(c => !(t[c.id] && t[c.id] >= c.savedAt)).sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+  return { cars, deleted: t };
+}
+const canon = d => JSON.stringify({ cars: (d.cars || []).map(c => c.id + c.savedAt).sort(), deleted: Object.keys(d.deleted || {}).sort().map(k => k + d.deleted[k]) });
+
+async function syncNow() {
+  readSession();
+  if (!session) { setSync("", "Saved on this device only."); return; }
+  if (syncing) return;
+  syncing = true; lastSync = Date.now();
+  setSync("busy", `Syncing as ${session.user.email}…`);
+  try {
+    const r = await api("/car_garage?select=data");
+    if (r.status === 401 || r.status === 403) { setSync("expired", "Your sign-in expired. Sign in again to keep syncing."); $("syncAct").hidden = false; return; }
+    if (!r.ok) {
+      const body = await r.text();
+      if (r.status === 404 || /PGRST205|42P01|car_garage/.test(body)) setSync("bad", "Sync needs a one-time setup in Supabase (car-garage-setup.sql). Cars are saved on this device until then.");
+      else setSync("bad", "Couldn't reach the sync server. Cars are saved on this device; they'll sync next time.");
+      return;
+    }
+    const rows = await r.json();
+    const remote = (rows[0] && rows[0].data) || { cars: [], deleted: {} };
+    const merged = mergeCars(remote);
+    saved = merged.cars; tomb = merged.deleted;
+    if (currentId && !saved.some(c => c.id === currentId)) currentId = null;
+    persistSaved(); try { localStorage.setItem(TOMB_KEY, JSON.stringify(tomb)); } catch (e) {}
+    renderSaved();
+    if (canon(merged) !== canon(remote)) {
+      const p = await api("/car_garage?on_conflict=user_id", {
+        method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ user_id: session.user.id, data: merged, updated_at: new Date().toISOString() }),
+      });
+      if (!p.ok) { setSync("bad", "Couldn't upload your latest changes. They're saved on this device and will sync next time."); return; }
+    }
+    setSync("ok", `Synced to ${session.user.email}. Your saved cars match on every device you sign in on.`);
+  } catch (e) {
+    setSync("bad", "You're offline. Cars are saved on this device and will sync when you're back online.");
+  } finally { syncing = false; }
+}
+
+async function signIn(e) {
+  e.preventDefault();
+  const email = $("siEmail").value.trim(), pw = $("siPw").value;
+  if (!email || !pw) { $("siMsg").textContent = "Enter your email and password."; return; }
+  $("siBtn").disabled = true; $("siMsg").textContent = "Signing in…";
+  try {
+    const r = await fetch(AUTH + "/token?grant_type=password", { method: "POST", headers: H, body: JSON.stringify({ email, password: pw }) });
+    const s = await r.json();
+    if (!r.ok || !s.access_token) { $("siMsg").textContent = "That email and password didn't match. Use the account from your Budget app."; return; }
+    sessionKey = SESSION_KEYS[0]; writeSession(s);
+    $("siPw").value = ""; $("signinForm").hidden = true;
+    syncNow();
+  } catch (err) { $("siMsg").textContent = "Couldn't reach the sign-in server. Check your connection."; }
+  finally { $("siBtn").disabled = false; }
+}
+async function forgotPw() {
+  const email = $("siEmail").value.trim();
+  if (!email) { $("siMsg").textContent = "Type your email above first, then tap Forgot password."; return; }
+  try { await fetch(AUTH + "/recover", { method: "POST", headers: H, body: JSON.stringify({ email }) }); } catch (e) {}
+  $("siMsg").textContent = `If ${email} has an account, a reset link is on its way.`;
+}
+
 try {
   const s = JSON.parse(localStorage.getItem(KEY) || "null");
   if (s) { load(s); currentId = s.currentId || null; if (s.carName) $("carName").value = s.carName; }
 } catch (e) {}
+
+$("syncAct").addEventListener("click", () => { $("signinForm").hidden = false; $("siEmail").focus(); });
+$("signinForm").addEventListener("submit", signIn);
+$("siForgot").addEventListener("click", forgotPw);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Date.now() - lastSync > 15000) syncNow(); });
 
 $("saveCar").addEventListener("click", saveCar);
 $("newCar").addEventListener("click", newCar);
@@ -802,6 +941,7 @@ $("cmp").addEventListener("click", e => { const r = e.target.closest("tr"); if (
 $("cmp").addEventListener("keydown", e => { const r = e.target.closest("tr"); if (r && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setMonths(+r.dataset.m); } });
 $("reset").addEventListener("click", () => { load(DEFAULTS); render(); });
 renderSaved();
+syncNow();
 $("lookupBtn").addEventListener("click", lookupVin);
 $("vin").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); lookupVin(); } });
 $("scanBtn").addEventListener("click", startScan);
