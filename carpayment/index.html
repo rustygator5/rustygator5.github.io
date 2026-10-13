@@ -106,6 +106,44 @@ tbody tr:hover td { background: var(--accent-soft); }
 .mode button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
 .mode button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .field.quote .box { border-color: var(--accent); }
+
+.vehicle { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 16px; }
+.vinrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.vinrow .field { flex: 1 1 260px; }
+.vinrow .box input { text-transform: uppercase; letter-spacing: .06em; }
+.btn { font: 600 14px var(--body); border-radius: 7px; padding: 10px 14px; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: var(--panel); white-space: nowrap; }
+.btn.ghost { background: var(--panel); color: var(--accent); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn:focus-visible, .linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vstatus { font-size: 13px; color: var(--muted); }
+.vstatus.err { color: var(--warn); }
+.vbody { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
+@media (max-width: 820px) { .vbody { grid-template-columns: 1fr; } }
+.vbody > div { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.vname { font-family: var(--display); font-weight: 700; font-size: 24px; line-height: 1.15; margin: 0; text-wrap: balance; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+.recalls { display: grid; gap: 6px; }
+.recalls h3 { font: 600 13px var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; }
+.pill { display: inline-block; font: 600 12px var(--body); padding: 2px 8px; border-radius: 999px; margin-left: 6px; text-transform: none; letter-spacing: 0; }
+.pill.warn { background: var(--warn); color: var(--panel); }
+.pill.ok { background: var(--good); color: var(--panel); }
+.recalls details { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font-size: 13px; }
+.recalls summary { cursor: pointer; font-weight: 500; }
+.recalls details p { margin: 6px 0 0; color: var(--muted); }
+.recalls a, .vlinks a { color: var(--accent); }
+.vlinks { display: flex; flex-wrap: wrap; gap: 8px; }
+.linkbtn { font: 500 14px var(--body); text-decoration: none; padding: 8px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.linkbtn:hover { border-color: var(--accent); }
+.fair { font-size: 14px; padding: 10px 12px; border-radius: 7px; background: var(--accent-soft); }
+.fair.warn { color: var(--warn); }
+.fair.good { color: var(--good); }
+
+.scanner { position: fixed; inset: 0; z-index: 50; background: #000; display: grid; grid-template-rows: 1fr auto; }
+.scanner video { width: 100%; height: 100%; object-fit: cover; min-height: 0; }
+.scanner .guide { position: absolute; left: 8%; right: 8%; top: 50%; height: 2px; background: #FF5A3C; box-shadow: 0 0 8px #FF5A3C; }
+.scanner .bar2 { display: grid; gap: 10px; padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); background: #111; color: #EEE; text-align: center; font-size: 14px; }
+.scanner .btn { justify-self: center; background: #EEE; color: #111; border-color: #EEE; }
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
 
@@ -113,8 +151,47 @@ tbody tr:hover td { background: var(--accent-soft); }
   <header>
     <a class="home" href="/">← Wilson Dashboard</a>
     <h1>Car Payment Planner</h1>
-    <p>Work out the payment for a deal, or start from the salesman's monthly quote and see what car price it actually works out to.</p>
+    <p>Look up the exact car by VIN, work out the payment for a deal, or start from the salesman's monthly quote and see what car price it actually works out to.</p>
   </header>
+
+  <section class="vehicle" aria-labelledby="vehHead">
+    <div class="vinrow">
+      <div class="field">
+        <label for="vin" id="vehHead">Vehicle VIN</label>
+        <div class="box"><input id="vin" maxlength="17" autocapitalize="characters" spellcheck="false" placeholder="17 characters, e.g. 1HGCV1F34LA012345"></div>
+      </div>
+      <button type="button" class="btn ghost" id="scanBtn">Scan barcode</button>
+      <button type="button" class="btn" id="lookupBtn">Look up</button>
+    </div>
+    <div class="vstatus" id="vstatus">Scan the barcode on the driver's door jamb sticker, or type the VIN from the windshield.</div>
+
+    <div class="vbody" id="vbody" hidden>
+      <div>
+        <h2 class="vname" id="vname"></h2>
+        <div class="chips" id="vchips"></div>
+        <div class="recalls" id="recalls"></div>
+      </div>
+      <div>
+        <div class="recalls"><h3>Check the fair price</h3></div>
+        <div class="vlinks" id="vlinks"></div>
+        <div class="field">
+          <label for="fair">Fair price you found</label>
+          <div class="box"><span>$</span><input id="fair" inputmode="decimal" placeholder="e.g. KBB Fair Purchase Price"></div>
+          <small>Use KBB's Fair Purchase Price or Edmunds' typical price for this trim and mileage.</small>
+        </div>
+        <div class="fair" id="fairResult" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="scanner" id="scanner" hidden>
+    <video id="scanVideo" playsinline muted></video>
+    <div class="guide" aria-hidden="true"></div>
+    <div class="bar2">
+      <div id="scanMsg">Line the red bar up across the VIN barcode on the door jamb sticker.</div>
+      <button type="button" class="btn" id="scanCancel">Cancel</button>
+    </div>
+  </div>
 
   <div class="grid">
     <form class="inputs" id="form" autocomplete="off">
@@ -236,6 +313,8 @@ tbody tr:hover td { background: var(--accent-soft); }
 const IDS = ["price", "tax", "fees", "down", "trade", "owed", "apr", "months", "quote"];
 const DEFAULTS = { price: "32,500", tax: "7", fees: "1,200", down: "4,000", trade: "8,000", owed: "0", apr: "6.9", months: "60", quote: "550", taxTrade: true };
 let mode = "forward";
+let lastImplied = 0;
+let vehicle = null;   // { vin, year, make, model, trim, chips[], recalls[] | null }
 const KEY = "carPaymentPlanner.v1";
 const $ = id => document.getElementById(id);
 const usd = (n, cents = false) => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 });
@@ -284,6 +363,7 @@ function render() {
   $("priceLabel").textContent = fwd ? "Total cost (vehicle price)" : "Price you agreed on";
   $("bigLabel").textContent = fwd ? "Monthly payment" : "Car price this payment works out to";
   if (fwd) renderForward(); else renderReverse();
+  renderFair(fwd ? num("price") : lastImplied);
   document.querySelectorAll("#terms button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.m === Math.round(num("months")))));
   save();
 }
@@ -292,6 +372,7 @@ function renderReverse() {
   const d = deal(), quote = num("quote");
   const financed = principalFor(quote, d.apr, d.months);
   const price = Math.max(0, priceFor(financed, d));
+  lastImplied = price;
   const taxable = $("taxTrade").checked ? Math.max(0, price - d.trade) : price;
   const tax = taxable * d.taxRate / 100;
   const totalPaid = quote * d.months;
@@ -399,6 +480,7 @@ function renderForward() {
 function save() {
   try {
     const s = {}; IDS.forEach(id => s[id] = $(id).value); s.taxTrade = $("taxTrade").checked; s.mode = mode;
+    s.vin = $("vin").value; s.fair = $("fair").value; s.vehicle = vehicle;
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch (e) {}
 }
@@ -406,6 +488,147 @@ function load(src) {
   IDS.forEach(id => { if (src[id] != null) $(id).value = src[id]; });
   if (src.taxTrade != null) $("taxTrade").checked = !!src.taxTrade;
   if (src.mode === "forward" || src.mode === "reverse") mode = src.mode;
+  if (src.vin != null) $("vin").value = src.vin;
+  if (src.fair != null) $("fair").value = src.fair;
+  if (src.vehicle && src.vehicle.vin) { vehicle = src.vehicle; showVehicle(); }
+}
+
+/* ---------- Vehicle lookup (NHTSA, free, no key) ---------- */
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const slug = s => String(s).toLowerCase().trim().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const titleCase = s => String(s).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase());
+const VIN_RE = /[A-HJ-NPR-Z0-9]{17}/;
+
+// North American VINs carry a check digit in position 9
+function vinCheckOk(vin) {
+  const map = { A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9 };
+  const w = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+  let sum = 0;
+  for (let i = 0; i < 17; i++) { const c = vin[i]; sum += (/\d/.test(c) ? +c : map[c]) * w[i]; }
+  const r = sum % 11;
+  return vin[8] === (r === 10 ? "X" : String(r));
+}
+
+function vstatus(msg, err) { const el = $("vstatus"); el.textContent = msg; el.className = "vstatus" + (err ? " err" : ""); }
+
+async function lookupVin() {
+  const vin = $("vin").value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  $("vin").value = vin;
+  if (!VIN_RE.test(vin) || vin.length !== 17) {
+    vstatus("A VIN is exactly 17 letters and numbers, and never uses I, O or Q. Check for a typo.", true); return;
+  }
+  const btn = $("lookupBtn"); btn.disabled = true; vstatus("Looking up " + vin + "…");
+  try {
+    const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${vin}?format=json`);
+    const r = (await res.json()).Results[0];
+    if (!r.Make || !r.Model || !r.ModelYear) {
+      vstatus("The NHTSA database doesn't recognize this VIN. Double-check each character against the car.", true); return;
+    }
+    const engine = [r.DisplacementL && (+r.DisplacementL).toFixed(1) + "L", r.EngineCylinders && r.EngineCylinders + "-cyl", r.ElectrificationLevel].filter(Boolean).join(" ");
+    vehicle = {
+      vin, year: r.ModelYear, make: titleCase(r.Make), model: r.Model, trim: r.Trim || r.Series || "",
+      chips: [engine, r.FuelTypePrimary, r.DriveType, r.BodyClass, r.TransmissionStyle, r.PlantCountry && "Built in " + titleCase(r.PlantCountry)].filter(Boolean),
+      checkOk: vinCheckOk(vin), recalls: null,
+    };
+    showVehicle();
+    vstatus("Found it. Make sure this matches the car and trim on the window sticker.");
+    try {
+      const rr = await fetch(`https://api.nhtsa.gov/recalls/recallsByVehicle?make=${encodeURIComponent(r.Make)}&model=${encodeURIComponent(r.Model)}&modelYear=${r.ModelYear}`);
+      const list = (await rr.json()).results || [];
+      vehicle.recalls = list.map(x => ({ id: x.NHTSACampaignNumber, date: x.ReportReceivedDate, comp: x.Component, summary: x.Summary, remedy: x.Remedy }));
+    } catch (e) { vehicle.recalls = "error"; }
+    showVehicle(); save();
+  } catch (e) {
+    vstatus("Couldn't reach the NHTSA vehicle database. Check your connection and try again.", true);
+  } finally { btn.disabled = false; }
+}
+
+function showVehicle() {
+  const v = vehicle; if (!v) return;
+  $("vbody").hidden = false;
+  $("vname").textContent = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ");
+  $("vchips").innerHTML = v.chips.map(c => `<span class="chip">${esc(c)}</span>`).join("") +
+    (v.checkOk ? "" : `<span class="chip">VIN check digit doesn't match. Normal for some imports; otherwise recheck the VIN.</span>`);
+
+  const nhtsaVin = `https://www.nhtsa.gov/recalls?vin=${v.vin}`;
+  let rec;
+  if (v.recalls === null) rec = `<h3>Recalls</h3><div class="vstatus">Checking recalls…</div>`;
+  else if (v.recalls === "error") rec = `<h3>Recalls</h3><div class="vstatus">Couldn't load recalls. <a href="${nhtsaVin}" target="_blank" rel="noopener">Check on NHTSA</a>.</div>`;
+  else if (!v.recalls.length) rec = `<h3>Recalls <span class="pill ok">None found</span></h3><div class="vstatus">No recalls on file for the ${esc(v.year)} ${esc(v.model)}.</div>`;
+  else rec = `<h3>Recalls <span class="pill warn">${v.recalls.length} for this model</span></h3>
+    <div class="vstatus">These cover every ${esc(v.year)} ${esc(v.model)}. <a href="${nhtsaVin}" target="_blank" rel="noopener">See which are still open on this exact VIN</a>, and ask the dealer for proof the work was done.</div>` +
+    v.recalls.map(x => `<details><summary>${esc(x.comp)}</summary><p>${esc(x.summary)}</p>${x.remedy ? `<p><b>Fix:</b> ${esc(x.remedy)}</p>` : ""}<p>Campaign ${esc(x.id)} · ${esc(x.date)}</p></details>`).join("");
+  $("recalls").innerHTML = rec;
+
+  const mk = slug(v.make), md = slug(v.model);
+  $("vlinks").innerHTML = [
+    ["Kelley Blue Book", `https://www.kbb.com/${mk}/${md}/${v.year}/`],
+    ["Edmunds", `https://www.edmunds.com/${mk}/${md}/${v.year}/`],
+    ["Similar cars for sale", `https://www.autotrader.com/cars-for-sale/${v.year}/${mk}/${md}`],
+  ].map(([t, u]) => `<a class="linkbtn" href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join("");
+}
+
+function renderFair(dealerPrice) {
+  const el = $("fairResult"), fair = num("fair");
+  if (!vehicle || fair <= 0 || dealerPrice <= 0) { el.hidden = true; return; }
+  const diff = dealerPrice - fair, pct = diff / fair * 100;
+  const what = mode === "forward" ? "The dealer's price" : "The price this payment works out to";
+  el.hidden = false;
+  if (Math.abs(pct) <= 3) {
+    el.className = "fair good";
+    el.textContent = `${what} (${usd(dealerPrice)}) is within 3% of the fair price. That's a reasonable deal.`;
+  } else if (diff > 0) {
+    el.className = "fair warn";
+    el.textContent = `${what} (${usd(dealerPrice)}) is ${usd(diff)} (${pct.toFixed(1)}%) above the fair price. There's room to negotiate.`;
+  } else {
+    el.className = "fair good";
+    el.textContent = `${what} (${usd(dealerPrice)}) is ${usd(-diff)} (${(-pct).toFixed(1)}%) below the fair price. Good deal, as long as the car checks out.`;
+  }
+}
+
+/* ---------- Barcode scanner (ZXing, loaded only when needed) ---------- */
+let reader = null;
+function loadZXing() {
+  if (window.ZXing) return Promise.resolve();
+  return new Promise((ok, fail) => {
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js";
+    s.onload = ok; s.onerror = fail; document.head.appendChild(s);
+  });
+}
+function cleanScan(text) {
+  let t = String(text).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (t.length === 18 && t[0] === "I") t = t.slice(1);   // imported-vehicle prefix on some Code 39 labels
+  const m = t.match(VIN_RE);
+  return m ? m[0] : null;
+}
+function stopScan() {
+  try { reader && reader.reset(); } catch (e) {}
+  reader = null; $("scanner").hidden = true;
+}
+async function startScan() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    vstatus("This browser can't use the camera here. Type the VIN instead.", true); return;
+  }
+  $("scanner").hidden = false;
+  $("scanMsg").textContent = "Starting camera…";
+  try {
+    await loadZXing();
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_39, ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.QR_CODE]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    reader = new ZXing.BrowserMultiFormatReader(hints);
+    $("scanMsg").textContent = "Line the red bar up across the VIN barcode on the door jamb sticker.";
+    await reader.decodeFromConstraints({ video: { facingMode: "environment" } }, $("scanVideo"), result => {
+      if (!result || !reader) return;
+      const vin = cleanScan(result.getText());
+      if (!vin) { $("scanMsg").textContent = "That barcode isn't a VIN. Try the one labeled VIN on the sticker."; return; }
+      stopScan(); $("vin").value = vin; lookupVin();
+    });
+  } catch (e) {
+    stopScan();
+    vstatus("Couldn't open the camera. Allow camera access for this site, or type the VIN instead.", true);
+  }
 }
 function setMonths(m) { $("months").value = m; render(); }
 
@@ -422,5 +645,11 @@ $("terms").addEventListener("click", e => { const b = e.target.closest("button")
 $("cmp").addEventListener("click", e => { const r = e.target.closest("tr"); if (r) setMonths(+r.dataset.m); });
 $("cmp").addEventListener("keydown", e => { const r = e.target.closest("tr"); if (r && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setMonths(+r.dataset.m); } });
 $("reset").addEventListener("click", () => { load(DEFAULTS); render(); });
+$("lookupBtn").addEventListener("click", lookupVin);
+$("vin").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); lookupVin(); } });
+$("scanBtn").addEventListener("click", startScan);
+$("scanCancel").addEventListener("click", stopScan);
+$("fair").addEventListener("input", render);
+$("fair").addEventListener("blur", () => { const v = num("fair"); $("fair").value = v ? v.toLocaleString("en-US") : ""; save(); });
 render();
 </script>
