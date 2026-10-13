@@ -110,7 +110,8 @@ tbody tr:hover td { background: var(--accent-soft); }
 .vehicle { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 16px; }
 .vinrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .vinrow .field { flex: 1 1 260px; }
-.vinrow .box input { text-transform: uppercase; letter-spacing: .06em; }
+#vin { text-transform: uppercase; letter-spacing: .06em; }
+#carName { font-family: var(--body); }
 .btn { font: 600 14px var(--body); border-radius: 7px; padding: 10px 14px; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: var(--panel); white-space: nowrap; }
 .btn.ghost { background: var(--panel); color: var(--accent); }
 .btn:disabled { opacity: .55; cursor: default; }
@@ -139,6 +140,26 @@ tbody tr:hover td { background: var(--accent-soft); }
 .fair.warn { color: var(--warn); }
 .fair.good { color: var(--good); }
 
+.jump { display: inline-block; margin-top: 6px; font-size: 13px; color: var(--accent); }
+.saved { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 14px; scroll-margin-top: 16px; }
+.savedtop { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.saved h2 { font-family: var(--display); font-weight: 600; font-size: 20px; margin: 0; }
+.count { font: 500 13px var(--body); color: var(--muted); margin-left: 6px; }
+.savedlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.savedlist li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.savedlist li.current { border-color: var(--accent); background: var(--accent-soft); }
+.savedlist .info { flex: 1 1 240px; min-width: 0; display: grid; gap: 2px; }
+.savedlist .nm { font-weight: 600; overflow-wrap: anywhere; }
+.savedlist .meta { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.savedlist .nums { display: flex; gap: 16px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 14px; }
+.savedlist .nums small { display: block; font: 500 11px var(--body); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.savedlist .acts { display: flex; gap: 6px; }
+.savedlist .btn { padding: 7px 12px; font-size: 13px; }
+.btn.danger { background: var(--panel); color: var(--warn); border-color: var(--line); }
+.btn.danger.armed { background: var(--warn); color: var(--panel); border-color: var(--warn); }
+.tag { font-size: 12px; font-weight: 600; }
+.tag.warn { color: var(--warn); } .tag.good { color: var(--good); }
+
 .scanner { position: fixed; inset: 0; z-index: 50; background: #000; display: grid; grid-template-rows: 1fr auto; }
 .scanner video { width: 100%; height: 100%; object-fit: cover; min-height: 0; }
 .scanner .guide { position: absolute; left: 8%; right: 8%; top: 50%; height: 2px; background: #FF5A3C; box-shadow: 0 0 8px #FF5A3C; }
@@ -151,6 +172,7 @@ tbody tr:hover td { background: var(--accent-soft); }
   <header>
     <a class="home" href="/">← Wilson Dashboard</a>
     <h1>Car Payment Planner</h1>
+    <a class="jump" href="#saved" id="jumpSaved">Saved cars (0)</a>
     <p>Look up the exact car by VIN, work out the payment for a deal, or start from the salesman's monthly quote and see what car price it actually works out to.</p>
   </header>
 
@@ -307,6 +329,22 @@ tbody tr:hover td { background: var(--accent-soft); }
       </div>
     </section>
   </div>
+
+  <section class="saved" id="saved" aria-labelledby="savedHead">
+    <div class="savedtop">
+      <h2 id="savedHead">Saved cars <span class="count" id="savedCount">0 of 10</span></h2>
+      <button type="button" class="reset" id="newCar">Start a new car</button>
+    </div>
+    <div class="vinrow">
+      <div class="field">
+        <label for="carName">Name this car</label>
+        <div class="box"><input id="carName" maxlength="60" placeholder="e.g. Blue Accord at Gator Honda"></div>
+      </div>
+      <button type="button" class="btn" id="saveCar">Save this car</button>
+    </div>
+    <div class="vstatus" id="savedStatus">Saves the VIN lookup, fair price and every number in the deal. Cars are kept on this device.</div>
+    <ul class="savedlist" id="savedList"></ul>
+  </section>
 </div>
 
 <script>
@@ -477,12 +515,17 @@ function renderForward() {
   }).join("");
 }
 
+function snapshot() {
+  const s = {}; IDS.forEach(id => s[id] = $(id).value); s.taxTrade = $("taxTrade").checked; s.mode = mode;
+  s.vin = $("vin").value; s.fair = $("fair").value; s.vehicle = vehicle;
+  return s;
+}
 function save() {
   try {
-    const s = {}; IDS.forEach(id => s[id] = $(id).value); s.taxTrade = $("taxTrade").checked; s.mode = mode;
-    s.vin = $("vin").value; s.fair = $("fair").value; s.vehicle = vehicle;
+    const s = snapshot(); s.currentId = currentId; s.carName = $("carName").value;
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch (e) {}
+  updateSaveBtn();
 }
 function load(src) {
   IDS.forEach(id => { if (src[id] != null) $(id).value = src[id]; });
@@ -632,7 +675,120 @@ async function startScan() {
 }
 function setMonths(m) { $("months").value = m; render(); }
 
-try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) load(s); } catch (e) {}
+/* ---------- Saved cars (up to 10, kept on this device) ---------- */
+const SAVED_KEY = "carPaymentPlanner.saved.v1", MAX_SAVED = 10;
+let saved = [], currentId = null;
+try { saved = JSON.parse(localStorage.getItem(SAVED_KEY) || "[]"); if (!Array.isArray(saved)) saved = []; } catch (e) { saved = []; }
+
+function persistSaved() {
+  try { localStorage.setItem(SAVED_KEY, JSON.stringify(saved)); return true; }
+  catch (e) { return false; }
+}
+function savedStatus(msg, err) { const el = $("savedStatus"); el.textContent = msg; el.className = "vstatus" + (err ? " err" : ""); }
+const isSaved = () => saved.some(c => c.id === currentId);
+function updateSaveBtn() { $("saveCar").textContent = isSaved() ? "Update saved car" : "Save this car"; }
+
+function summary() {
+  const fwd = mode === "forward", d = deal();
+  return {
+    mode, months: d.months, apr: d.apr, fair: num("fair"),
+    price: fwd ? d.price : lastImplied,
+    pay: fwd ? payment(d.financed, d.apr, d.months) : num("quote"),
+  };
+}
+
+function saveCar() {
+  const vName = vehicle ? [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") : "";
+  let name = $("carName").value.trim() || vName;
+  const existing = saved.find(c => c.id === currentId);
+  if (!existing && saved.length >= MAX_SAVED) {
+    savedStatus(`You've saved ${MAX_SAVED} cars, the most this holds. Delete one below to save this car.`, true); return;
+  }
+  if (!name) name = "Car " + (saved.length + (existing ? 0 : 1));
+  $("carName").value = name;
+  const item = { id: existing ? existing.id : Date.now().toString(36), name, savedAt: new Date().toISOString(), state: snapshot(), sum: summary() };
+  if (existing) saved[saved.indexOf(existing)] = item; else saved.unshift(item);
+  currentId = item.id;
+  if (!persistSaved()) { savedStatus("This browser wouldn't save. Private browsing blocks saving; try a normal window.", true); return; }
+  savedStatus(existing ? `Updated “${name}”.` : `Saved “${name}”.`);
+  renderSaved(); save();
+}
+
+function openCar(id) {
+  const c = saved.find(x => x.id === id); if (!c) return;
+  vehicle = null; $("vbody").hidden = true;
+  vstatus("Scan the barcode on the driver's door jamb sticker, or type the VIN from the windshield.");
+  load(c.state);
+  currentId = c.id; $("carName").value = c.name;
+  render(); renderSaved();
+  savedStatus(`Opened “${c.name}”. Changes aren't saved until you tap Update saved car.`);
+  window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+function newCar() {
+  vehicle = null; currentId = null;
+  $("vin").value = ""; $("fair").value = ""; $("carName").value = "";
+  $("vbody").hidden = true;
+  vstatus("Scan the barcode on the driver's door jamb sticker, or type the VIN from the windshield.");
+  render(); renderSaved();
+  savedStatus("Started a new car. Your loan numbers carried over; change what's different.");
+  window.scrollTo({ top: 0 });
+}
+
+let armed = null;
+function deleteCar(id, btn) {
+  if (armed !== id) {
+    armed = id; btn.classList.add("armed"); btn.textContent = "Tap again to delete";
+    setTimeout(() => { if (armed === id) { armed = null; renderSaved(); } }, 3000);
+    return;
+  }
+  armed = null;
+  const c = saved.find(x => x.id === id);
+  saved = saved.filter(x => x.id !== id);
+  if (currentId === id) currentId = null;
+  persistSaved(); renderSaved(); save();
+  savedStatus(`Deleted “${c ? c.name : "car"}”.`);
+}
+
+function renderSaved() {
+  $("savedCount").textContent = `${saved.length} of ${MAX_SAVED}`;
+  $("jumpSaved").textContent = `Saved cars (${saved.length})`;
+  updateSaveBtn();
+  if (!saved.length) { $("savedList").innerHTML = ""; return; }
+  $("savedList").innerHTML = saved.map(c => {
+    const s = c.sum || {}, v = c.state.vehicle;
+    const meta = [v ? [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") : "", c.state.vin,
+      s.months ? `${s.months} mo at ${s.apr}%` : "", "Saved " + new Date(c.savedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })]
+      .filter(Boolean).filter((x, i, a) => a.indexOf(x) === i && x !== c.name).join(" · ");
+    let tag = "";
+    if (s.fair > 0 && s.price > 0) {
+      const pct = (s.price - s.fair) / s.fair * 100;
+      tag = Math.abs(pct) <= 3 ? `<span class="tag good">Fair price</span>`
+        : pct > 0 ? `<span class="tag warn">${usd(s.price - s.fair)} over fair</span>`
+        : `<span class="tag good">${usd(s.fair - s.price)} under fair</span>`;
+    }
+    return `<li class="${c.id === currentId ? "current" : ""}">
+      <div class="info"><span class="nm">${esc(c.name)}${c.id === currentId ? " <span class=\"tag\">(open now)</span>" : ""}</span>
+        <span class="meta">${esc(meta)}</span>${tag}</div>
+      <div class="nums"><div><small>${s.mode === "reverse" ? "Works out to" : "Price"}</small>${usd(s.price || 0)}</div><div><small>Monthly</small>${usd(s.pay || 0, true)}</div></div>
+      <div class="acts"><button type="button" class="btn ghost" data-open="${esc(c.id)}">Open</button><button type="button" class="btn danger" data-del="${esc(c.id)}">Delete</button></div>
+    </li>`;
+  }).join("");
+}
+
+try {
+  const s = JSON.parse(localStorage.getItem(KEY) || "null");
+  if (s) { load(s); currentId = s.currentId || null; if (s.carName) $("carName").value = s.carName; }
+} catch (e) {}
+
+$("saveCar").addEventListener("click", saveCar);
+$("newCar").addEventListener("click", newCar);
+$("carName").addEventListener("input", save);
+$("carName").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); saveCar(); } });
+$("savedList").addEventListener("click", e => {
+  const o = e.target.closest("[data-open]"), d = e.target.closest("[data-del]");
+  if (o) openCar(o.dataset.open); else if (d) deleteCar(d.dataset.del, d);
+});
 
 // Add thousands separators when leaving a dollar field
 document.querySelector(".mode").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { mode = b.dataset.mode; render(); } });
@@ -645,6 +801,7 @@ $("terms").addEventListener("click", e => { const b = e.target.closest("button")
 $("cmp").addEventListener("click", e => { const r = e.target.closest("tr"); if (r) setMonths(+r.dataset.m); });
 $("cmp").addEventListener("keydown", e => { const r = e.target.closest("tr"); if (r && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setMonths(+r.dataset.m); } });
 $("reset").addEventListener("click", () => { load(DEFAULTS); render(); });
+renderSaved();
 $("lookupBtn").addEventListener("click", lookupVin);
 $("vin").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); lookupVin(); } });
 $("scanBtn").addEventListener("click", startScan);
