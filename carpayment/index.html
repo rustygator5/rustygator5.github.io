@@ -98,9 +98,29 @@ th { font: 600 12px var(--display); text-transform: uppercase; letter-spacing: .
 th:first-child, td:first-child { text-align: left; }
 td { font-family: var(--mono); font-size: 14px; border-bottom: 1px solid var(--line); }
 tr:last-child td { border-bottom: 0; }
-tr.sel td { background: var(--accent-soft); font-weight: 600; }
-tbody tr { cursor: pointer; }
-tbody tr:hover td { background: var(--accent-soft); }
+.compare { display: grid; gap: 14px; }
+.compare h2, .compare p { margin: 0; }
+.rates { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.rate { display: grid; gap: 4px; min-width: 0; }
+.rate .box { width: 260px; max-width: 100%; }
+.rate .box input.rname { font: 400 14px var(--body); padding-left: 10px; flex: 1.4; border-right: 1px solid var(--line); }
+.rate .box input.rapr { flex: 1; padding-left: 8px; }
+.rate .box button { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 0 10px; cursor: pointer; }
+.rate .box button:hover { color: var(--warn); }
+.rate.fixed .box { background: var(--accent-soft); }
+.rate label { font-size: 12px; color: var(--muted); }
+.addrate { align-self: center; }
+.matrix th:not(:first-child) { text-align: center; }
+.matrix td { padding: 0; }
+.matrix td:first-child { padding: 8px 10px; font-family: var(--body); font-size: 13px; white-space: normal; min-width: 92px; }
+.matrix td:first-child b { display: block; font-family: var(--mono); font-size: 14px; }
+.cell { display: grid; gap: 1px; width: 100%; min-width: 92px; padding: 8px 10px; border: 0; background: none; color: var(--ink); text-align: center; cursor: pointer; font: 600 15px var(--mono); font-variant-numeric: tabular-nums; border-radius: 6px; }
+.cell small { font: 400 11px var(--body); color: var(--muted); }
+.cell:hover:not(:disabled) { background: var(--accent-soft); }
+.cell:disabled { cursor: default; opacity: 1; }
+.cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cell.sel { background: var(--accent); color: var(--panel); }
+.cell.sel small { color: var(--panel); }
 .mode { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; }
 .mode button { font: 600 14px var(--display); letter-spacing: .02em; border: 0; border-radius: 6px; padding: 9px 8px; background: transparent; color: var(--muted); cursor: pointer; }
 .mode button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
@@ -335,19 +355,21 @@ tbody tr:hover td { background: var(--accent-soft); }
         <dl id="breakdown"></dl>
         <div class="note" id="note" hidden></div>
       </div>
-
-      <div class="compare" id="compareCard">
-        <h2>Compare loan lengths</h2>
-        <p>Same deal and APR at different terms. Tap a row to use it.</p>
-        <div class="tablewrap">
-          <table>
-            <thead><tr><th>Term</th><th>Monthly</th><th>Total interest</th><th>Total paid</th></tr></thead>
-            <tbody id="cmp"></tbody>
-          </table>
-        </div>
-      </div>
     </section>
   </div>
+
+  <section class="compare" id="compareCard" aria-labelledby="cmpHead">
+    <h2 id="cmpHead">Compare rates and loan lengths</h2>
+    <p id="cmpSub">Monthly payment and total interest for this car at each rate and term. Tap a box to use that rate and term.</p>
+    <div class="rates" id="rates"></div>
+    <div class="tablewrap">
+      <table class="matrix">
+        <thead id="cmpHeadRow"></thead>
+        <tbody id="cmp"></tbody>
+      </table>
+    </div>
+    <div class="vstatus" id="cmpBest"></div>
+  </section>
 
   <section class="saved" id="saved" aria-labelledby="savedHead">
     <div class="savedtop">
@@ -382,7 +404,8 @@ tbody tr:hover td { background: var(--accent-soft); }
 const IDS = ["price", "tax", "fees", "down", "trade", "owed", "apr", "months", "quote"];
 const DEFAULTS = { price: "32,500", tax: "7", fees: "1,200", down: "4,000", trade: "8,000", owed: "0", apr: "6.9", months: "60", quote: "550", taxTrade: true };
 let mode = "forward";
-let lastImplied = 0;
+let lastImplied = 0, lastFinanced = 0;
+let rates = [{ label: "Credit union", apr: "5.49" }, { label: "Higher rate", apr: "8.9" }];
 let vehicle = null;   // { vin, year, make, model, trim, chips[], recalls[] | null }
 const KEY = "carPaymentPlanner.v1";
 const $ = id => document.getElementById(id);
@@ -428,11 +451,11 @@ function render() {
   $("modeRev").setAttribute("aria-pressed", String(!fwd));
   $("quoteField").hidden = fwd;
   $("priceHint").hidden = fwd;
-  $("compareCard").hidden = !fwd;
   $("priceLabel").textContent = fwd ? "Total cost (vehicle price)" : "Price you agreed on";
   $("bigLabel").textContent = fwd ? "Monthly payment" : "Car price this payment works out to";
   if (fwd) renderForward(); else renderReverse();
   renderFair(fwd ? num("price") : lastImplied);
+  renderCompare();
   document.querySelectorAll("#terms button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.m === Math.round(num("months")))));
   save();
 }
@@ -441,7 +464,7 @@ function renderReverse() {
   const d = deal(), quote = num("quote");
   const financed = principalFor(quote, d.apr, d.months);
   const price = Math.max(0, priceFor(financed, d));
-  lastImplied = price;
+  lastImplied = price; lastFinanced = financed;
   const taxable = $("taxTrade").checked ? Math.max(0, price - d.trade) : price;
   const tax = taxable * d.taxRate / 100;
   const totalPaid = quote * d.months;
@@ -537,18 +560,57 @@ function renderForward() {
   } else {
     note.hidden = true;
   }
+  lastFinanced = d.financed;
+}
 
+/* ---------- Rate × term comparison (rates saved with each car) ---------- */
+const MAX_RATES = 4;
+function renderRates() {
+  $("rates").innerHTML =
+    `<div class="rate fixed"><label>This deal</label><div class="box"><input class="rname" value="Your APR" disabled aria-label="Rate name"><input class="rapr" id="fixedApr" disabled aria-label="APR"><span>%</span></div></div>` +
+    rates.map((r, i) => `<div class="rate"><label for="rapr${i}">Rate to compare</label><div class="box">
+      <input class="rname" data-i="${i}" data-k="label" value="${esc(r.label)}" maxlength="24" placeholder="Name" aria-label="Name for this rate">
+      <input class="rapr" id="rapr${i}" data-i="${i}" data-k="apr" value="${esc(r.apr)}" inputmode="decimal"><span>%</span>
+      <button type="button" data-del-rate="${i}" aria-label="Remove this rate">×</button></div></div>`).join("") +
+    (rates.length < MAX_RATES ? `<button type="button" class="reset addrate" id="addRate">+ Add a rate</button>` : "");
+}
+
+function renderCompare() {
+  const d = deal(), financed = lastFinanced;
+  $("fixedApr").value = d.apr;
+  $("cmpSub").textContent = mode === "forward"
+    ? "Monthly payment and total interest for this car at each rate and term. Tap a box to use that rate and term."
+    : "Uses the amount financed from the dealer's quote, so you can see what the same car would cost at other rates and terms.";
   const terms = [36, 48, 60, 72, 84];
   if (d.months > 0 && !terms.includes(d.months)) terms.push(d.months), terms.sort((a, b) => a - b);
-  $("cmp").innerHTML = terms.map(m => {
-    const p = payment(d.financed, d.apr, m), tp = p * m;
-    return `<tr data-m="${m}" class="${m === d.months ? "sel" : ""}" tabindex="0"><td>${m} mo</td><td>${usd(p, true)}</td><td>${usd(Math.max(0, tp - d.financed))}</td><td>${usd(tp)}</td></tr>`;
-  }).join("");
+  const rows = [{ label: "Your APR", apr: d.apr, fixed: true },
+    ...rates.map(r => ({ label: r.label || "Rate", apr: parseFloat(String(r.apr).replace(/[^0-9.]/g, "")) })).filter(r => isFinite(r.apr))];
+  $("cmpHeadRow").innerHTML = `<tr><th>Rate</th>${terms.map(m => `<th>${m} mo</th>`).join("")}</tr>`;
+  $("cmp").innerHTML = rows.map(r => `<tr><td>${esc(r.label)}<b>${r.apr}%</b></td>${terms.map(m => {
+    const p = payment(financed, r.apr, m), int = Math.max(0, p * m - financed);
+    const sel = r.fixed && m === d.months;
+    return `<td><button type="button" class="cell${sel ? " sel" : ""}"${mode === "forward" ? "" : " disabled"} data-apr="${r.apr}" data-m="${m}" aria-label="${r.apr}% for ${m} months: ${usd(p, true)} a month, ${usd(int)} interest">${usd(p)}<small>${usd(int)} interest</small></button></td>`;
+  }).join("")}</tr>`).join("");
+
+  const others = rows.slice(1).filter(r => r.apr !== d.apr);
+  const el = $("cmpBest");
+  if (!others.length || d.months <= 0 || financed <= 0) {
+    el.textContent = "Add the rate your bank or credit union offers to see what it would save you.";
+    return;
+  }
+  const cost = apr => { const p = payment(financed, apr, d.months); return { p, int: p * d.months - financed }; };
+  const now = cost(d.apr);
+  const lower = others.filter(r => r.apr < d.apr).sort((a, b) => a.apr - b.apr)[0];
+  const r = lower || others.sort((a, b) => a.apr - b.apr)[0], alt = cost(r.apr);
+  el.textContent = lower
+    ? `At ${r.apr}% (${r.label}) instead of ${d.apr}%, you'd pay ${usd(now.p - alt.p, true)} less a month and ${usd(now.int - alt.int)} less interest over ${d.months} months.`
+    : `Your ${d.apr}% beats every rate you've added. ${r.label} at ${r.apr}% would cost ${usd(alt.p - now.p, true)} more a month and ${usd(alt.int - now.int)} more interest over ${d.months} months.`;
 }
 
 function snapshot() {
   const s = {}; IDS.forEach(id => s[id] = $(id).value); s.taxTrade = $("taxTrade").checked; s.mode = mode;
   s.vin = $("vin").value; s.fair = $("fair").value; s.vehicle = vehicle; s.adUrl = $("adUrl").value.trim();
+  s.rates = rates.map(r => ({ label: r.label, apr: r.apr }));
   return s;
 }
 function save() {
@@ -566,6 +628,8 @@ function load(src) {
   if (src.fair != null) $("fair").value = src.fair;
   if (src.adUrl != null) $("adUrl").value = src.adUrl;
   showAdLink();
+  if (Array.isArray(src.rates)) rates = src.rates.slice(0, MAX_RATES).map(r => ({ label: String(r.label || ""), apr: String(r.apr ?? "") }));
+  renderRates();
   if (src.vehicle && src.vehicle.vin) { vehicle = src.vehicle; showVehicle(); }
 }
 
@@ -962,8 +1026,22 @@ document.querySelector(".mode").addEventListener("click", e => { const b = e.tar
 $("form").addEventListener("input", render);
 $("form").addEventListener("submit", e => e.preventDefault());
 $("terms").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setMonths(+b.dataset.m); });
-$("cmp").addEventListener("click", e => { const r = e.target.closest("tr"); if (r) setMonths(+r.dataset.m); });
-$("cmp").addEventListener("keydown", e => { const r = e.target.closest("tr"); if (r && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setMonths(+r.dataset.m); } });
+$("cmp").addEventListener("click", e => {
+  const c = e.target.closest(".cell"); if (!c) return;
+  $("apr").value = c.dataset.apr; setMonths(+c.dataset.m);
+});
+$("rates").addEventListener("input", e => {
+  const t = e.target; if (t.dataset.i == null) return;
+  rates[+t.dataset.i][t.dataset.k] = t.value; renderCompare(); save();
+});
+$("rates").addEventListener("click", e => {
+  const del = e.target.closest("[data-del-rate]");
+  if (del) { rates.splice(+del.dataset.delRate, 1); renderRates(); render(); return; }
+  if (e.target.closest("#addRate") && rates.length < MAX_RATES) {
+    rates.push({ label: "", apr: "" }); renderRates(); render();
+    const inputs = $("rates").querySelectorAll(".rname:not([disabled])"); inputs[inputs.length - 1].focus();
+  }
+});
 $("reset").addEventListener("click", () => { load(DEFAULTS); render(); });
 renderSaved();
 syncNow();
@@ -975,5 +1053,6 @@ $("scanBtn").addEventListener("click", startScan);
 $("scanCancel").addEventListener("click", stopScan);
 $("fair").addEventListener("input", render);
 $("fair").addEventListener("blur", () => { const v = num("fair"); $("fair").value = v ? v.toLocaleString("en-US") : ""; save(); });
+if (!$("fixedApr")) renderRates();
 render();
 </script>
