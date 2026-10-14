@@ -111,7 +111,11 @@ tbody tr:hover td { background: var(--accent-soft); }
 .vinrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
 .vinrow .field { flex: 1 1 260px; }
 #vin { text-transform: uppercase; letter-spacing: .06em; }
-#carName { font-family: var(--body); }
+#carName, #adUrl { font-family: var(--body); }
+#adUrl { font-size: 15px; }
+.adopen { text-decoration: none; }
+.savedlist .acts { flex-wrap: wrap; }
+.savedlist .acts a.btn { text-decoration: none; }
 .btn { font: 600 14px var(--body); border-radius: 7px; padding: 10px 14px; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: var(--panel); white-space: nowrap; }
 .btn.ghost { background: var(--panel); color: var(--accent); }
 .btn:disabled { opacity: .55; cursor: default; }
@@ -194,6 +198,13 @@ tbody tr:hover td { background: var(--accent-soft); }
       <button type="button" class="btn" id="lookupBtn">Look up</button>
     </div>
     <div class="vstatus" id="vstatus">Scan the barcode on the driver's door jamb sticker, or type the VIN from the windshield.</div>
+    <div class="vinrow">
+      <div class="field">
+        <label for="adUrl">Link to the ad</label>
+        <div class="box"><input id="adUrl" type="url" inputmode="url" spellcheck="false" placeholder="Paste the listing link, e.g. from Autotrader or the dealer's site"></div>
+      </div>
+      <a class="btn ghost adopen" id="adOpen" href="#" target="_blank" rel="noopener noreferrer" hidden>Open ad ↗</a>
+    </div>
 
     <div class="vbody" id="vbody" hidden>
       <div>
@@ -537,7 +548,7 @@ function renderForward() {
 
 function snapshot() {
   const s = {}; IDS.forEach(id => s[id] = $(id).value); s.taxTrade = $("taxTrade").checked; s.mode = mode;
-  s.vin = $("vin").value; s.fair = $("fair").value; s.vehicle = vehicle;
+  s.vin = $("vin").value; s.fair = $("fair").value; s.vehicle = vehicle; s.adUrl = $("adUrl").value.trim();
   return s;
 }
 function save() {
@@ -553,7 +564,21 @@ function load(src) {
   if (src.mode === "forward" || src.mode === "reverse") mode = src.mode;
   if (src.vin != null) $("vin").value = src.vin;
   if (src.fair != null) $("fair").value = src.fair;
+  if (src.adUrl != null) $("adUrl").value = src.adUrl;
+  showAdLink();
   if (src.vehicle && src.vehicle.vin) { vehicle = src.vehicle; showVehicle(); }
+}
+
+// Only real web links become clickable; "autotrader.com/..." gets https:// added
+function safeUrl(raw) {
+  let t = String(raw || "").trim();
+  if (!t) return null;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(t)) t = "https://" + t;
+  try { const u = new URL(t); return /^https?:$/.test(u.protocol) && u.hostname.includes(".") ? u.href : null; } catch (e) { return null; }
+}
+function showAdLink() {
+  const u = safeUrl($("adUrl").value), a = $("adOpen");
+  a.hidden = !u; if (u) a.href = u;
 }
 
 /* ---------- Vehicle lookup (NHTSA, free, no key) ---------- */
@@ -736,7 +761,7 @@ function saveCar() {
 
 function openCar(id) {
   const c = saved.find(x => x.id === id); if (!c) return;
-  vehicle = null; $("vbody").hidden = true;
+  vehicle = null; $("vbody").hidden = true; $("adUrl").value = "";
   vstatus("Scan the barcode on the driver's door jamb sticker, or type the VIN from the windshield.");
   load(c.state);
   currentId = c.id; $("carName").value = c.name;
@@ -747,7 +772,7 @@ function openCar(id) {
 
 function newCar() {
   vehicle = null; currentId = null;
-  $("vin").value = ""; $("fair").value = ""; $("carName").value = "";
+  $("vin").value = ""; $("fair").value = ""; $("carName").value = ""; $("adUrl").value = ""; showAdLink();
   $("vbody").hidden = true;
   vstatus("Scan the barcode on the driver's door jamb sticker, or type the VIN from the windshield.");
   render(); renderSaved();
@@ -793,7 +818,7 @@ function renderSaved() {
       <div class="info"><span class="nm">${esc(c.name)}${c.id === currentId ? " <span class=\"tag\">(open now)</span>" : ""}</span>
         <span class="meta">${esc(meta)}</span>${tag}</div>
       <div class="nums"><div><small>${s.mode === "reverse" ? "Works out to" : "Price"}</small>${usd(s.price || 0)}</div><div><small>Monthly</small>${usd(s.pay || 0, true)}</div></div>
-      <div class="acts"><button type="button" class="btn ghost" data-open="${esc(c.id)}">Open</button><button type="button" class="btn danger" data-del="${esc(c.id)}">Delete</button></div>
+      <div class="acts">${safeUrl(c.state.adUrl) ? `<a class="btn ghost" href="${esc(safeUrl(c.state.adUrl))}" target="_blank" rel="noopener noreferrer">Ad ↗</a>` : ""}<button type="button" class="btn ghost" data-open="${esc(c.id)}">Open</button><button type="button" class="btn danger" data-del="${esc(c.id)}">Delete</button></div>
     </li>`;
   }).join("");
 }
@@ -943,6 +968,8 @@ $("reset").addEventListener("click", () => { load(DEFAULTS); render(); });
 renderSaved();
 syncNow();
 $("lookupBtn").addEventListener("click", lookupVin);
+$("adUrl").addEventListener("input", () => { showAdLink(); save(); });
+$("adUrl").addEventListener("blur", () => { const u = safeUrl($("adUrl").value); if (u) { $("adUrl").value = u; save(); } });
 $("vin").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); lookupVin(); } });
 $("scanBtn").addEventListener("click", startScan);
 $("scanCancel").addEventListener("click", stopScan);
