@@ -164,6 +164,30 @@ tr:last-child td { border-bottom: 0; }
 .fair.warn { color: var(--warn); }
 .fair.good { color: var(--good); }
 
+.calcview { display: grid; gap: 24px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs button { font: 600 15px var(--display); letter-spacing: .02em; background: none; border: 0; border-bottom: 3px solid transparent; color: var(--muted); padding: 10px 14px 9px; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.garage { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 14px; }
+.garagehead h2 { font-family: var(--display); font-weight: 600; font-size: 20px; margin: 0; }
+.garagehead p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.gtable { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+.gtable th, .gtable td { text-align: left; vertical-align: top; white-space: normal; padding: 9px 12px; border-bottom: 1px solid var(--line); min-width: 150px; max-width: 220px; }
+.gtable thead th { text-transform: none; letter-spacing: 0; font: 600 15px var(--body); color: var(--ink); vertical-align: bottom; }
+.gtable thead th small { display: block; font: 400 12px var(--body); color: var(--muted); margin-top: 2px; }
+.gtable .lbl { position: sticky; left: 0; z-index: 1; background: var(--panel); font: 500 13px var(--body); text-transform: none; letter-spacing: 0; color: var(--muted); min-width: 120px; max-width: 140px; }
+.gtable td { font: 500 14px var(--mono); font-variant-numeric: tabular-nums; }
+.gtable td.txt { font: 400 13px var(--body); overflow-wrap: anywhere; }
+.gtable td small { display: block; font: 400 12px var(--body); color: var(--muted); }
+.gtable td.best { color: var(--good); font-weight: 700; }
+.gtable td.best::after { content: " ✓"; }
+.gtable tr.section th { font: 600 12px var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); background: var(--bg); padding: 6px 12px; }
+.gtable tr.section th.lbl { background: var(--bg); }
+.gtable .gacts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.gtable .gacts .btn { padding: 5px 10px; font-size: 12px; text-decoration: none; }
+.gtable td a { color: var(--accent); }
+.gempty { color: var(--muted); padding: 8px 0; max-width: 60ch; }
 .jump { display: inline-block; margin-top: 6px; font-size: 13px; color: var(--accent); }
 .saved { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 14px; scroll-margin-top: 16px; }
 .savedtop { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
@@ -208,6 +232,20 @@ tr:last-child td { border-bottom: 0; }
     <p>Look up the exact car by VIN, work out the payment for a deal, or start from the salesman's monthly quote and see what car price it actually works out to.</p>
   </header>
 
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button type="button" role="tab" id="tabCalc" aria-controls="calcView" data-view="calc">Calculator</button>
+    <button type="button" role="tab" id="tabCompare" aria-controls="garageView" data-view="compare">Compare cars <span id="tabCount">(0)</span></button>
+  </nav>
+
+  <section class="garage" id="garageView" role="tabpanel" aria-labelledby="tabCompare" hidden>
+    <div class="garagehead">
+      <h2>Compare saved cars</h2>
+      <p id="garageSub">Each car as you last saved it. Green marks the best value in each row.</p>
+    </div>
+    <div class="tablewrap" id="garageWrap"></div>
+  </section>
+
+  <div class="calcview" id="calcView" role="tabpanel" aria-labelledby="tabCalc">
   <section class="vehicle" aria-labelledby="vehHead">
     <div class="vinrow">
       <div class="field">
@@ -398,6 +436,7 @@ tr:last-child td { border-bottom: 0; }
       </form>
     </div>
   </section>
+  </div>
 </div>
 
 <script>
@@ -438,9 +477,9 @@ function principalFor(pay, apr, n) {
 }
 
 // Solve financed = price + tax(price) + fees − down − (trade − owed) for price
-function priceFor(financed, d) {
+function priceFor(financed, d, taxTrade = $("taxTrade").checked) {
   const t = d.taxRate / 100, rest = financed - d.fees + d.down + d.trade - d.owed;
-  if (!$("taxTrade").checked) return rest / (1 + t);
+  if (!taxTrade) return rest / (1 + t);
   const p = (rest + t * d.trade) / (1 + t);
   return p >= d.trade ? p : rest;           // below the trade value, nothing is taxed
 }
@@ -823,7 +862,92 @@ function saveCar() {
   renderSaved(); save(); syncNow();
 }
 
+/* ---------- Compare saved cars tab ---------- */
+// Same math as the calculator, worked from a saved car's stored inputs instead of the form
+function calcState(s) {
+  const n = k => { const v = parseFloat(String(s[k] ?? "").replace(/[^0-9.]/g, "")); return isFinite(v) ? v : 0; };
+  const d = { price: n("price"), taxRate: n("tax"), fees: n("fees"), down: n("down"), trade: n("trade"), owed: n("owed"), apr: n("apr"), months: Math.round(n("months")) };
+  const taxTrade = s.taxTrade !== false, rev = s.mode === "reverse";
+  let price = d.price, financed, pay;
+  if (rev) {
+    pay = n("quote"); financed = principalFor(pay, d.apr, d.months);
+    price = Math.max(0, priceFor(financed, d, taxTrade));
+  }
+  const tax = (taxTrade ? Math.max(0, price - d.trade) : price) * d.taxRate / 100;
+  const equity = d.trade - d.owed;
+  if (!rev) { financed = Math.max(0, price + tax + d.fees - d.down - equity); pay = payment(financed, d.apr, d.months); }
+  const interest = Math.max(0, pay * d.months - financed);
+  const fair = n("fair");
+  return { ...d, rev, price, tax, equity, financed, pay, interest, fair,
+    vsFair: fair > 0 && price > 0 ? price - fair : null,
+    total: d.down + Math.max(0, equity) + pay * d.months };
+}
+
+function renderGarage() {
+  $("tabCount").textContent = `(${saved.length})`;
+  const wrap = $("garageWrap");
+  if (saved.length < 2) {
+    wrap.innerHTML = `<p class="gempty">${saved.length ? "You've saved 1 car." : "No saved cars yet."} Save at least two cars on the Calculator tab, and they'll line up here side by side: price, fair price, payment, interest, total cost and recalls.</p>`;
+    return;
+  }
+  const cars = saved.map(c => ({ c, v: c.state.vehicle, x: calcState(c.state) }));
+  const best = (vals, dir) => {           // index set of the best numeric values (ties all win)
+    const nums = vals.map(v => (typeof v === "number" && isFinite(v) ? v : null));
+    const real = nums.filter(v => v !== null);
+    if (real.length < 2 || Math.min(...real) === Math.max(...real)) return new Set();
+    const target = dir === "min" ? Math.min(...real) : Math.max(...real);
+    return new Set(nums.map((v, i) => (v !== null && Math.abs(v - target) < 0.005 ? i : -1)).filter(i => i >= 0));
+  };
+  const rows = [
+    ["section", "The car"],
+    ["Vehicle", cars.map(({ v }) => v ? esc([v.year, v.make, v.model, v.trim].filter(Boolean).join(" ")) : "<small>No VIN lookup</small>"), "txt"],
+    ["Specs", cars.map(({ v }) => v && v.chips ? esc(v.chips.slice(0, 3).join(" · ")) : "—"), "txt"],
+    ["Recalls", cars.map(({ v }) => !v || !Array.isArray(v.recalls) ? "—" : v.recalls.length ? `${v.recalls.length} for this model` : "None found"), "txt",
+      cars.map(({ v }) => v && Array.isArray(v.recalls) ? v.recalls.length : null), "min"],
+    ["VIN", cars.map(({ c }) => c.state.vin ? esc(c.state.vin) : "—"), "txt"],
+    ["section", "Price"],
+    ["Price", cars.map(({ x }) => x.price ? usd(x.price) + (x.rev ? "<small>Worked out from the dealer's quote</small>" : "") : "—"), "",
+      cars.map(({ x }) => x.price || null), "min"],
+    ["Fair price you found", cars.map(({ x }) => x.fair ? usd(x.fair) : "—")],
+    ["Price vs fair", cars.map(({ x }) => x.vsFair === null ? "—" : Math.abs(x.vsFair / x.fair) <= 0.03 ? "Fair" : x.vsFair > 0 ? `${usd(x.vsFair)} over` : `${usd(-x.vsFair)} under`), "",
+      cars.map(({ x }) => x.vsFair === null ? null : x.vsFair / x.fair), "min"],
+    ["Tax + fees", cars.map(({ x }) => usd(x.tax + x.fees))],
+    ["Down + trade-in", cars.map(({ x }) => usd(x.down + x.equity) + (x.equity < 0 ? "<small>Includes negative equity</small>" : ""))],
+    ["section", "Loan"],
+    ["Amount financed", cars.map(({ x }) => usd(x.financed)), "", cars.map(({ x }) => x.financed), "min"],
+    ["APR", cars.map(({ x }) => x.apr + "%"), "", cars.map(({ x }) => x.apr), "min"],
+    ["Term", cars.map(({ x }) => x.months + " months")],
+    ["Monthly payment", cars.map(({ x }) => usd(x.pay, true)), "", cars.map(({ x }) => x.pay), "min"],
+    ["Total interest", cars.map(({ x }) => usd(x.interest)), "", cars.map(({ x }) => x.interest), "min"],
+    ["Car really costs you", cars.map(({ x }) => usd(x.total)), "", cars.map(({ x }) => x.total), "min"],
+  ];
+  const head = `<thead><tr><th class="lbl"></th>${cars.map(({ c }) => {
+    const ad = safeUrl(c.state.adUrl);
+    return `<th>${esc(c.name)}<small>Saved ${new Date(c.savedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
+      <div class="gacts"><button type="button" class="btn ghost" data-gopen="${esc(c.id)}">Open</button>${ad ? `<a class="btn ghost" href="${esc(ad)}" target="_blank" rel="noopener noreferrer">Ad ↗</a>` : ""}</div></th>`;
+  }).join("")}</tr></thead>`;
+  const body = rows.map(r => {
+    if (r[0] === "section") return `<tr class="section"><th class="lbl">${r[1]}</th>${cars.map(() => "<th></th>").join("")}</tr>`;
+    const [label, cells, cls = "", vals, dir] = r;
+    const win = vals ? best(vals, dir) : new Set();
+    return `<tr><th class="lbl" scope="row">${label}</th>${cells.map((h, i) => `<td class="${[cls, win.has(i) ? "best" : ""].join(" ").trim()}">${h}</td>`).join("")}</tr>`;
+  }).join("");
+  wrap.innerHTML = `<table class="gtable">${head}<tbody>${body}</tbody></table>`;
+}
+
+let view = "calc";
+function setView(v) {
+  view = v === "compare" ? "compare" : "calc";
+  $("calcView").hidden = view !== "calc";
+  $("garageView").hidden = view !== "compare";
+  $("tabCalc").setAttribute("aria-selected", String(view === "calc"));
+  $("tabCompare").setAttribute("aria-selected", String(view === "compare"));
+  if (view === "compare") renderGarage();
+  try { localStorage.setItem("carPaymentPlanner.view", view); } catch (e) {}
+}
+
 function openCar(id) {
+  setView("calc");
   const c = saved.find(x => x.id === id); if (!c) return;
   vehicle = null; $("vbody").hidden = true; $("adUrl").value = "";
   vstatus("Scan the barcode on the driver's door jamb sticker, or type the VIN from the windshield.");
@@ -863,6 +987,7 @@ function deleteCar(id, btn) {
 
 function renderSaved() {
   $("savedCount").textContent = `${saved.length} of ${MAX_SAVED}`;
+  renderGarage();
   $("jumpSaved").textContent = `Saved cars (${saved.length})`;
   updateSaveBtn();
   if (!saved.length) { $("savedList").innerHTML = ""; return; }
@@ -1053,6 +1178,11 @@ $("scanBtn").addEventListener("click", startScan);
 $("scanCancel").addEventListener("click", stopScan);
 $("fair").addEventListener("input", render);
 $("fair").addEventListener("blur", () => { const v = num("fair"); $("fair").value = v ? v.toLocaleString("en-US") : ""; save(); });
+$("tabCalc").addEventListener("click", () => setView("calc"));
+$("tabCompare").addEventListener("click", () => setView("compare"));
+$("jumpSaved").addEventListener("click", () => setView("calc"));
+$("garageWrap").addEventListener("click", e => { const b = e.target.closest("[data-gopen]"); if (b) openCar(b.dataset.gopen); });
 if (!$("fixedApr")) renderRates();
 render();
+try { setView(localStorage.getItem("carPaymentPlanner.view") || "calc"); } catch (e) { setView("calc"); }
 </script>
