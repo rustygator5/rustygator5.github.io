@@ -200,6 +200,13 @@ tr:last-child td { border-bottom: 0; }
 .savedlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .savedlist li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
 .savedlist li.current { border-color: var(--accent); background: var(--accent-soft); }
+.savedlist li { background: var(--panel); }
+.savedlist li.current { background: var(--accent-soft); }
+.grip { flex: none; align-self: stretch; display: grid; place-items: center; width: 28px; margin: -12px 0 -12px -8px; border: 0; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: grab; touch-action: none; border-radius: 6px; }
+.grip:hover { color: var(--accent); background: var(--bg); }
+.grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.savedlist.sorting, .savedlist.sorting * { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.savedlist li.dragging { box-shadow: 0 8px 24px rgba(0,0,0,.22); border-color: var(--accent); position: relative; z-index: 5; }
 .savedlist .info { flex: 1 1 240px; min-width: 0; display: grid; gap: 2px; }
 .savedlist .nm { font-weight: 600; overflow-wrap: anywhere; }
 .savedlist .meta { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
@@ -989,7 +996,67 @@ function deleteCar(id, btn) {
   savedStatus(`Deleted “${c ? c.name : "car"}”.`);
 }
 
+/* ---------- Drag to reorder saved cars (mouse, touch, or arrow keys on the handle) ---------- */
+const ORDER_KEY = "carPaymentPlanner.order.v1";
+let orderInfo = { ids: [], at: "" };
+try { const o = JSON.parse(localStorage.getItem(ORDER_KEY) || "null"); if (o && Array.isArray(o.ids)) orderInfo = o; } catch (e) {}
+let drag = null;
+
+function commitOrder(ids) {
+  const before = saved.map(c => c.id).join();
+  saved.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  if (saved.map(c => c.id).join() === before) return false;
+  orderInfo = { ids: saved.map(c => c.id), at: new Date().toISOString() };
+  try { localStorage.setItem(ORDER_KEY, JSON.stringify(orderInfo)); } catch (e) {}
+  persistSaved(); syncNow();
+  return true;
+}
+
+function startDrag(e) {
+  const grip = e.target.closest(".grip"); if (!grip || e.button > 0) return;
+  const li = grip.closest("li");
+  e.preventDefault();
+  drag = { li, grip, id: li.dataset.id, lastY: e.clientY };
+  li.classList.add("dragging");
+  $("savedList").classList.add("sorting");
+}
+function moveDrag(e) {
+  if (!drag) return;
+  drag.lastY = e.clientY;
+  const list = $("savedList");
+  const others = [...list.children].filter(x => x !== drag.li);
+  const next = others.find(x => { const r = x.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+  if (next) { if (drag.li.nextElementSibling !== next) list.insertBefore(drag.li, next); }
+  else if (list.lastElementChild !== drag.li) list.appendChild(drag.li);
+  // Scroll the page while dragging near the top or bottom of the screen
+  if (e.clientY < 70) window.scrollBy(0, -14); else if (e.clientY > innerHeight - 70) window.scrollBy(0, 14);
+}
+function endDrag() {
+  if (!drag) return;
+  const { li, id } = drag;
+  li.classList.remove("dragging"); $("savedList").classList.remove("sorting");
+  drag = null;
+  const moved = commitOrder([...$("savedList").children].map(x => x.dataset.id));
+  renderSaved();
+  if (moved) {
+    const c = saved.find(x => x.id === id);
+    savedStatus(`Moved “${c ? c.name : "car"}” to spot ${saved.indexOf(c) + 1} of ${saved.length}.`);
+  }
+}
+function keyMove(e) {
+  const grip = e.target.closest(".grip"); if (!grip) return;
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  e.preventDefault();
+  const id = grip.closest("li").dataset.id, ids = saved.map(c => c.id), i = ids.indexOf(id), j = i + (e.key === "ArrowUp" ? -1 : 1);
+  if (j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  commitOrder(ids); renderSaved();
+  const g = $("savedList").querySelector(`li[data-id="${CSS.escape(id)}"] .grip`); if (g) g.focus();
+  savedStatus(`Moved to spot ${j + 1} of ${ids.length}.`);
+}
+
 function renderSaved() {
+  if (drag) return;   // don't rebuild the list under someone's finger; endDrag re-renders
   $("savedCount").textContent = `${saved.length} of ${MAX_SAVED}`;
   renderGarage();
   $("jumpSaved").textContent = `Saved cars (${saved.length})`;
@@ -1007,7 +1074,8 @@ function renderSaved() {
         : pct > 0 ? `<span class="tag warn">${usd(s.price - s.fair)} over fair</span>`
         : `<span class="tag good">${usd(s.fair - s.price)} under fair</span>`;
     }
-    return `<li class="${c.id === currentId ? "current" : ""}">
+    return `<li class="${c.id === currentId ? "current" : ""}" data-id="${esc(c.id)}">
+      <button type="button" class="grip" aria-label="Move ${esc(c.name)}. Drag, or use the up and down arrow keys." title="Drag to reorder">⠿</button>
       <div class="info"><span class="nm">${esc(c.name)}${c.id === currentId ? " <span class=\"tag\">(open now)</span>" : ""}</span>
         <span class="meta">${esc(meta)}</span>${tag}</div>
       <div class="nums"><div><small>${s.mode === "reverse" ? "Works out to" : "Price"}</small>${usd(s.price || 0)}</div><div><small>Monthly</small>${usd(s.pay || 0, true)}</div></div>
@@ -1066,10 +1134,19 @@ function mergeCars(remote) {
   for (const c of [...(remote.cars || []), ...saved]) if (!byId[c.id] || c.savedAt > byId[c.id].savedAt) byId[c.id] = c;
   const cutoff = new Date(Date.now() - 90 * 864e5).toISOString();
   for (const id of Object.keys(t)) if (t[id] < cutoff) delete t[id];
-  const cars = Object.values(byId).filter(c => !(t[c.id] && t[c.id] >= c.savedAt)).sort((a, b) => b.savedAt.localeCompare(a.savedAt));
-  return { cars, deleted: t };
+  // The most recent drag-and-drop order wins; cars it doesn't list yet (new saves) go on top, newest first
+  const ro = remote.order && Array.isArray(remote.order.ids) ? remote.order : { ids: [], at: "" };
+  const order = (ro.at || "") > (orderInfo.at || "") ? ro : orderInfo;
+  const pos = new Map(order.ids.map((id, i) => [id, i]));
+  const cars = Object.values(byId).filter(c => !(t[c.id] && t[c.id] >= c.savedAt)).sort((a, b) => {
+    const ia = pos.has(a.id), ib = pos.has(b.id);
+    if (ia && ib) return pos.get(a.id) - pos.get(b.id);
+    if (ia !== ib) return ia ? 1 : -1;
+    return b.savedAt.localeCompare(a.savedAt);
+  });
+  return { cars, deleted: t, order };
 }
-const canon = d => JSON.stringify({ cars: (d.cars || []).map(c => c.id + c.savedAt).sort(), deleted: Object.keys(d.deleted || {}).sort().map(k => k + d.deleted[k]) });
+const canon = d => JSON.stringify({ cars: (d.cars || []).map(c => c.id + c.savedAt).sort(), deleted: Object.keys(d.deleted || {}).sort().map(k => k + d.deleted[k]), order: (d.order && d.order.at) || "" });
 
 async function syncNow() {
   readSession();
@@ -1089,7 +1166,8 @@ async function syncNow() {
     const rows = await r.json();
     const remote = (rows[0] && rows[0].data) || { cars: [], deleted: {} };
     const merged = mergeCars(remote);
-    saved = merged.cars; tomb = merged.deleted;
+    saved = merged.cars; tomb = merged.deleted; orderInfo = merged.order;
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(orderInfo)); } catch (e) {}
     if (currentId && !saved.some(c => c.id === currentId)) currentId = null;
     persistSaved(); try { localStorage.setItem(TOMB_KEY, JSON.stringify(tomb)); } catch (e) {}
     renderSaved();
@@ -1142,6 +1220,12 @@ $("saveCar").addEventListener("click", saveCar);
 $("newCar").addEventListener("click", newCar);
 $("carName").addEventListener("input", save);
 $("carName").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); saveCar(); } });
+// Window-level move/up: the dragged row is moved in the page, which can drop the pointer's link to the handle
+$("savedList").addEventListener("pointerdown", startDrag);
+$("savedList").addEventListener("keydown", keyMove);
+window.addEventListener("pointermove", moveDrag);
+window.addEventListener("pointerup", endDrag);
+window.addEventListener("pointercancel", endDrag);
 $("savedList").addEventListener("click", e => {
   const o = e.target.closest("[data-open]"), d = e.target.closest("[data-del]");
   if (o) openCar(o.dataset.open); else if (d) deleteCar(d.dataset.del, d);
