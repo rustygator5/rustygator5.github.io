@@ -175,6 +175,10 @@ tr:last-child td { border-bottom: 0; }
 .gtable { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; }
 .gtable th, .gtable td { text-align: left; vertical-align: top; white-space: normal; padding: 9px 12px; border-bottom: 1px solid var(--line); min-width: 150px; max-width: 220px; }
 .gtable thead th { text-transform: none; letter-spacing: 0; font: 600 15px var(--body); color: var(--ink); vertical-align: bottom; }
+/* The table scrolls inside its own box so the car-name row can stay pinned at the top */
+#garageWrap { max-height: calc(100vh - 140px); max-height: calc(100dvh - 140px); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; }
+.gtable thead th { position: sticky; top: 0; z-index: 2; background: var(--panel); box-shadow: 0 1px 0 var(--line), 0 4px 6px -4px rgba(0,0,0,.18); }
+.gtable thead th.lbl { z-index: 3; }
 .gtable thead th small { display: block; font: 400 12px var(--body); color: var(--muted); margin-top: 2px; }
 .gtable .lbl { position: sticky; left: 0; z-index: 1; background: var(--panel); font: 500 13px var(--body); text-transform: none; letter-spacing: 0; color: var(--muted); min-width: 120px; max-width: 140px; }
 .gtable td { font: 500 14px var(--mono); font-variant-numeric: tabular-nums; }
@@ -187,7 +191,7 @@ tr:last-child td { border-bottom: 0; }
 .gtable .gacts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .gtable .gacts .btn { padding: 5px 10px; font-size: 12px; text-decoration: none; }
 .gtable td a { color: var(--accent); }
-.gempty { color: var(--muted); padding: 8px 0; max-width: 60ch; }
+.gempty { color: var(--muted); padding: 12px 14px; margin: 0; max-width: 60ch; }
 .jump { display: inline-block; margin-top: 6px; font-size: 13px; color: var(--accent); }
 .saved { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 14px; scroll-margin-top: 16px; }
 .savedtop { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
