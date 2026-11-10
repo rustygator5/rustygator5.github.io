@@ -299,15 +299,54 @@ function showSkeleton(type) {
 }
 
 // Estimated typical-month surplus from the Budget's recurring items.
+// Mirrors the Budget tab's "Planned Net" card for the CURRENT month, so the number here is
+// one you can actually find in the app. That means real occurrence counts (a month with two
+// bi-weekly paychecks counts two, not the 26/12 average), one-off items included, and any
+// dialed-in Actual amount used in place of the recurring estimate - exactly as render() does.
+function bgDaysIn(y, m) { return new Date(y, m + 1, 0).getDate(); }
+function bgParseLocal(str) {
+  const a = (str || '').split('-').map(Number);
+  let y = a[0] || 0; if (y > 0 && y < 100) y += 2000;
+  return new Date(y, a[1] - 1, a[2], 12);
+}
+function bgMkey(y, m) { return y + '-' + String(m + 1).padStart(2, '0'); }
+// The days an item falls on this month. Keys stay tied to these NATURAL days, which is also
+// how the Budget app keys dialed-in amounts (a one-month drag moves the day, not the key).
+function bgOccDays(it, y, m) {
+  const N = bgDaysIn(y, m), out = [];
+  if (it.freq === 'weekly') {
+    for (let d = 1; d <= N; d++) if (new Date(y, m, d).getDay() === (+it.weekday)) out.push(d);
+  } else if (it.freq === 'biweekly') {
+    const ms = 14 * 864e5, first = new Date(y, m, 1, 12).getTime(), last = new Date(y, m, N, 12).getTime();
+    let t = bgParseLocal(it.anchor).getTime();
+    if (isNaN(t)) return out;
+    if (t < first) t += Math.ceil((first - t) / ms) * ms;
+    while (t <= last) { const dt = new Date(t); if (dt.getMonth() === m && dt.getFullYear() === y) out.push(dt.getDate()); t += ms; }
+  } else {
+    out.push(Math.min(Math.max(1, +it.day || 1), N));
+  }
+  return out;
+}
 function budgetMonthlySurplus(state) {
   if (!state || !Array.isArray(state.recurring)) return null;
-  const perMonth = { monthly: 1, biweekly: 26/12, weekly: 52/12 };
-  let surplus = 0;
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth(), k = bgMkey(y, m);
+  const acts = (state.actuals && state.actuals[k]) || {};
+  const amountFor = (it, key) => {
+    const av = acts[key];
+    return (av !== undefined && av !== '' && av !== null) ? (Number(av) || 0) : (Number(it.amount) || 0);
+  };
+  let inc = 0, exp = 0;
   state.recurring.forEach(it => {
-    const eq = (Number(it.amount) || 0) * (perMonth[it.freq || 'monthly'] || 1);
-    surplus += it.type === 'income' ? eq : -eq;
+    bgOccDays(it, y, m).forEach(day => {
+      const amt = amountFor(it, 'r_' + it.id + '_' + day);
+      if (it.type === 'income') inc += amt; else exp += amt;
+    });
   });
-  return surplus;
+  ((state.oneoff && state.oneoff[k]) || []).forEach(it => {
+    const amt = amountFor(it, 'o_' + it.id + '_' + (it.day || 1));
+    if (it.type === 'income') inc += amt; else exp += amt;
+  });
+  return inc - exp;
 }
 
 // Forward annual dividend income from a DivTracker cloud row.
@@ -437,7 +476,7 @@ async function loadHighlights() {
     const s = budgetMonthlySurplus(state);
     const dp = budgetDebtProgress(state);
     const dpSub = dp ? dp.pct.toFixed(0) + '% debt-free' + (dp.remaining > 0 ? ' · ' + money0(dp.remaining) + ' to go' : ' 🎉') : '';
-    if (s !== null && isFinite(s)) showHighlight('budget', (s >= 0 ? '+' : '−') + money0(s), '/ mo left over', s < 0, dpSub);
+    if (s !== null && isFinite(s)) showHighlight('budget', (s >= 0 ? '+' : '−') + money0(s), 'left this month', s < 0, dpSub);
     else { const el = slotFor('budget'); if (el) el.hidden = true; }
   }
 
